@@ -1,0 +1,23 @@
+# LoRA SFT on a single 24 GB GPU (RTX 3090/4090, A30).
+# python -m lifemate.train.sft_lora --config configs/sft_lora_24gb.yaml
+model: Qwen/Qwen3.5-4B
+train_file: outputs/sft/train.jsonl
+eval_file: outputs/sft/val.jsonl
+output_dir: checkpoints/sft-lora
+max_length: 12288                 # longer examples are skipped (reported at start-up)
+lora_r: 64
+lora_alpha: 128
+lora_dropout: 0.05
+target_modules: all-linear
+learning_rate: 1.0e-4
+num_train_epochs: 2
+per_device_train_batch_size: 1
+gradient_accumulation_steps: 16
+warmup_ratio: 0.03
+lr_scheduler_type: cosine
+logging_steps: 10
+eval_steps: 200
+save_steps: 200
+seed: 42
+enable_thinking: false
+attn_implementation: sdpa

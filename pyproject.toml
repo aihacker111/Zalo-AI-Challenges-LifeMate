@@ -1,0 +1,45 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "lifemate"
+version = "0.1.0"
+description = "Voice-to-action tool-calling agent for the Zalo AI Challenge 2026 LifeMate track"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+authors = [{ name = "LifeMate team" }]
+keywords = ["agent", "tool-calling", "speech", "vietnamese", "zalo-ai-challenge"]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "License :: OSI Approved :: MIT License",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
+# The core (data access, scorer, prompt building, guard, agent loop) uses the standard library only.
+dependencies = []
+
+[project.optional-dependencies]
+yaml = ["pyyaml>=6"]
+asr = ["qwen-asr", "soundfile", "numpy"]
+vllm = ["vllm>=0.10"]
+train = ["torch>=2.4", "transformers>=4.57", "peft>=0.17", "accelerate>=1.0", "pyyaml>=6"]
+dev = ["pytest>=8", "ruff>=0.6"]
+
+[project.scripts]
+lifemate = "lifemate.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.ruff]
+line-length = 120
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP", "SIM"]
+ignore = ["E501"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"

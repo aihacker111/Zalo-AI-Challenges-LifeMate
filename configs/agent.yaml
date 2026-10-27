@@ -1,0 +1,22 @@
+# Agent configuration (lifemate infer --config configs/agent.yaml). Every key is optional.
+agent:
+  max_steps: 8            # model steps per sample (a step = one tool call or finish)
+  time_budget_s: 25.0     # stop early under the 30 s/sample limit
+  temperature: 0.0        # greedy: required for reproducibility
+  max_new_tokens: 384
+  constrained: true       # JSON-schema constrained decoding of each action
+  prompt:
+    days_ahead: 8
+    fewshot_k: 3          # retrieved training trajectories shown in the prompt (0 disables)
+    result_max_items: 15
+    result_max_chars: 1500
+    history_result_max_chars: 600
+  guard:
+    validate_before_call: true
+    max_fix_attempts: 2
+    block_duplicate_reads: true
+    block_duplicate_writes: false
+    require_seen_refs: true
+    drop_unknown_args: true
+    drop_empty_optional_args: true
+    coerce_types: true
