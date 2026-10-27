@@ -51,40 +51,93 @@ train+public_test/
 
 ## Sử dụng nhanh
 
+Các lệnh dưới đây dùng `./data` làm thư mục dữ liệu nên không cần `--data`. Đã chạy được với vLLM 0.19.1 trên một GPU 24 GB.
+
+### 1. Kiểm tra pipeline (không cần GPU)
+
 ```bash
-DATA=data
-
-lifemate stats --data $DATA --split train
-
-# Kiểm tra pipeline: agent phát lại gold phải đạt ~100
-lifemate infer --data $DATA --split train --backend oracle --asr oracle --out outputs/oracle.jsonl
-lifemate score --data $DATA --split train --submission outputs/oracle.jsonl
-
-# ASR cho public_test (một lần, lưu cache), rồi chạy agent bằng vLLM
-lifemate transcribe --data $DATA --split public_test --asr qwen --asr-model Qwen/Qwen3-ASR-0.6B --out outputs/asr_public.jsonl
-lifemate infer --data $DATA --split public_test --backend vllm --model Qwen/Qwen3.5-4B \
-  --transcripts outputs/asr_public.jsonl --config configs/agent.yaml --out outputs/submission.jsonl --trace outputs/trace.jsonl
-lifemate validate --data $DATA --split public_test --submission outputs/submission.jsonl
+make test                                                         # 34 test
+lifemate stats --split train
+lifemate infer --split train --backend oracle --asr oracle --out outputs/oracle.jsonl
+lifemate score --split train --submission outputs/oracle.jsonl      # phải đạt ~99,99
 ```
 
-| Lệnh | Việc |
-|---|---|
-| `stats` | Thống kê split |
-| `transcribe` | ASR mọi lượt user (cả history), lưu JSON Lines |
-| `infer` | Chạy agent, ghi submission; hỗ trợ `--resume`, `--trace`, `--limit`, `--ids` |
-| `score` | Chấm trên split có nhãn, kèm phân loại lỗi; `--report` ghi chi tiết từng mẫu |
-| `validate` | Kiểm tra schema file nộp bằng `zaic_tools` của split |
-| `build-sft` | Dựng dữ liệu SFT: few-shot, augment đổi tên, holdout theo app hoặc theo kịch bản |
-| `asr-eval` | WER, WER bỏ dấu, tỉ lệ sai số của transcript so với gold (train) |
-| `asr-manifest` | Manifest fine-tune ASR từ audio train |
+### 2. Khởi động server vLLM
 
-Backend LLM: `vllm` (offline, dùng khi nộp bài), `openai` (bất kỳ server OpenAI-compatible nào, ví dụ `vllm serve`, khi phát triển) và `oracle` (phát lại gold).
+```bash
+source scripts/serve.sh models/base/Qwen3.5-4B base 8011 0.85    # model, tên phục vụ, cổng, tỉ lệ VRAM
+```
+
+`serve.sh` làm bốn việc:
+- kiểm tra cổng còn trống trước khi chạy;
+- chạy vLLM nền, ghi log vào `outputs/vllm_<cổng>.log`;
+- chờ tới khi server sẵn sàng (dòng `ready: …`), hoặc in đuôi log rồi dừng nếu vLLM chết lúc khởi động;
+- đặt hai biến `BASE_URL` và `VLLM_PID`.
+
+Phải chạy bằng `source`, không dùng `bash`, để hai biến này còn lại trong shell. Tắt server bằng `kill $VLLM_PID`.
+
+### 3. Chạy agent và chấm điểm
+
+```bash
+# 20 mẫu thử
+lifemate infer --split train --backend openai --model base --base-url $BASE_URL \
+  --asr oracle --limit 20 --out outputs/smoke.jsonl --trace outputs/smoke.trace.jsonl
+lifemate score --split train --submission outputs/smoke.jsonl --only-submitted
+
+# Baseline trên tập val leave-apps-out (~274 mẫu)
+lifemate build-sft --asr oracle --holdout apps --n-apps 10 --out-dir outputs/sft
+lifemate infer --split train --backend openai --model base --base-url $BASE_URL --asr oracle \
+  --ids-file outputs/sft/val_ids.txt --exclude-ids outputs/sft/val_ids.txt --fewshot-k 3 \
+  --out outputs/base_k3.jsonl --trace outputs/base_k3.trace.jsonl
+lifemate score --split train --submission outputs/base_k3.jsonl --ids-file outputs/sft/val_ids.txt
+```
+
+Khi chấm trên val, luôn dùng `--exclude-ids`. Thiếu nó, few-shot sẽ lấy chính các câu val làm ví dụ và điểm cao giả.
+
+### 4. Tạo bài nộp public_test
+
+```bash
+kill $VLLM_PID    # nhường GPU cho ASR
+lifemate transcribe --split public_test --asr qwen --asr-model models/base/Qwen3-ASR-0.6B --out outputs/asr_public.jsonl
+source scripts/serve.sh models/base/Qwen3.5-4B base 8011 0.85
+lifemate infer --split public_test --backend openai --model base --base-url $BASE_URL \
+  --transcripts outputs/asr_public.jsonl --fewshot-k 3 --out outputs/submission.jsonl --trace outputs/trace.jsonl
+lifemate validate --split public_test --submission outputs/submission.jsonl
+```
+
+### Các lệnh
+
+| Lệnh | Việc | Tuỳ chọn đáng chú ý |
+|---|---|---|
+| `stats` | Thống kê split | |
+| `transcribe` | ASR mọi lượt user (cả history), lưu JSON Lines | `--asr qwen\|oracle`, `--asr-model` |
+| `infer` | Chạy agent, ghi submission | `--backend vllm\|openai\|oracle`, `--base-url`, `--fewshot-k`, `--ids-file`, `--exclude-ids`, `--limit`, `--trace`, `--resume`, `--no-constrained`, `--config` |
+| `score` | Chấm trên split có nhãn, kèm phân loại lỗi | `--ids-file`, `--only-submitted`, `--report` |
+| `validate` | Kiểm tra schema file nộp bằng `zaic_tools` của split | |
+| `build-sft` | Dựng dữ liệu SFT và file `val_ids.txt` | `--holdout apps\|fold\|none`, `--augment`, `--fewshot-k`, `--transcripts` |
+| `asr-eval` | WER, WER bỏ dấu, tỉ lệ sai số so với gold | `--ids-file` |
+| `asr-manifest` | Manifest fine-tune Qwen3-ASR | `--val-ids` |
+
+Backend LLM:
+- `openai`: server OpenAI-compatible (`scripts/serve.sh`), dùng khi phát triển.
+- `vllm`: vLLM offline trong cùng tiến trình, dùng trong Docker khi nộp bài.
+- `oracle`: phát lại các call gold, dùng để kiểm tra pipeline.
+
+Với backend `openai`, `infer` kiểm tra server và tên model trước khi chạy, và dừng sau 5 mẫu lỗi liên tiếp (exit code 2). Nhờ vậy một server hỏng không bao giờ âm thầm sinh ra file nộp rỗng.
+
+### Scripts
+
+| Script | Việc |
+|---|---|
+| `scripts/serve.sh` | Khởi động vLLM, chờ sẵn sàng, export `BASE_URL`/`VLLM_PID` |
+| `scripts/baseline.sh` | Baseline k=0 và k=3 trên train (transcript gold) |
+| `scripts/train_sft_24gb.sh` | Dựng dữ liệu SFT và train LoRA trên 24 GB |
 
 ## Quy trình đề xuất
 
 Hướng dẫn chi tiết từng lệnh, mốc thời gian và bảng nhật ký nằm trong [docs/training.md](docs/training.md).
 
-1. **Baseline không train.** Chạy `scripts/baseline.sh` để có điểm zero-shot và few-shot (k = 3) trên train với transcript gold. Lỗi được phân loại thành `extra_read`, `missing_read`, `write_mismatch`, `ask_mismatch`, `oos_false_action`…
+1. **Baseline không train.** Đo điểm zero-shot và few-shot (k = 3) trên tập val leave-apps-out với transcript gold (mục 3 ở trên). Lỗi được phân loại thành `extra_read`, `missing_read`, `write_mismatch`, `ask_mismatch`, `oos_false_action`…
 2. **Đo ASR.** Chạy `transcribe` trên train rồi `asr-eval`; lưu ý riêng tỉ lệ sai số (tiền, giờ, số điện thoại).
 3. **LoRA SFT** nếu baseline còn cách xa mục tiêu: `scripts/train_sft_24gb.sh`. Dữ liệu dựng với input là **transcript ASR** để model quen với lỗi nhận dạng.
 4. **RFT.** `python -m lifemate.train.rft` lấy mẫu vài quỹ đạo cho mỗi task, chỉ giữ quỹ đạo đạt điểm tuyệt đối, rồi SFT thêm một vòng.
@@ -101,6 +154,21 @@ Hướng dẫn chi tiết từng lệnh, mốc thời gian và bảng nhật ký
 
 Qwen3.5 dùng kiến trúc lai Gated DeltaNet. Cài thêm `flash-linear-attention` (không cần nvcc) để train nhanh hơn. `causal-conv1d` là tuỳ chọn và cần CUDA toolkit; xem [docs/training.md](docs/training.md#0-môi-trường-ngày-1).
 
+## Xử lý sự cố
+
+| Triệu chứng | Nguyên nhân | Cách xử lý |
+|---|---|---|
+| `infer` báo `HTTP 404`, hoặc `curl localhost:8000/v1/models` trả `{"detail":"Invalid API key"}` | Cổng 8000 đang do một dịch vụ khác giữ (thường gặp trên máy dùng chung) | Dùng cổng khác: `source scripts/serve.sh … 8011 …`. **Đừng tắt tiến trình của người khác.** |
+| `serve.sh` báo `port … is already in use` | Còn một server cũ ở cổng đó | `curl localhost:<cổng>/v1/models`: nếu có model của mình thì `export BASE_URL=http://localhost:<cổng>/v1`; nếu không, đổi cổng |
+| `argument --base-url: expected one argument` | `$BASE_URL` rỗng: `serve.sh` chạy bằng `bash` hoặc ở terminal khác | Chạy `source scripts/serve.sh …`, hoặc ghi thẳng `--base-url http://localhost:8011/v1` |
+| `Connection refused` | Server chưa chạy hoặc đã chết | Xem `tail -60 outputs/vllm_<cổng>.log`, rồi khởi động lại bằng `serve.sh` |
+| `Free memory on device … is less than desired` | GPU đang được người khác dùng | Xem `nvidia-smi`, hạ tham số VRAM của `serve.sh` (ví dụ `0.6`) |
+| `EngineDeadError` ở request đầu tiên | Lỗi trong tiến trình EngineCore | `grep -v APIServer outputs/vllm_<cổng>.log \| grep -A40 Traceback`; thử `--no-constrained` để loại trừ bộ ràng buộc JSON |
+| `lifemate` không có tuỳ chọn mới, hoặc vẫn đòi `--data` | Code trên máy cũ | `git pull` (cài bằng `pip install -e .` nên không cần cài lại) |
+| Build `causal-conv1d` lỗi `nvcc was not found` | Gói tuỳ chọn cần CUDA toolkit | Bỏ qua, hoặc xem [docs/training.md](docs/training.md) |
+
+Trên máy dùng chung, **không dùng `pkill -f` với chuỗi ngắn**: nó có thể giết nhầm tiến trình khác. Tắt server của mình bằng `kill $VLLM_PID`.
+
 ## Docker (nộp bài cuối)
 
 ```bash
@@ -108,7 +176,7 @@ python -m lifemate.train.merge_lora --base Qwen/Qwen3.5-4B --adapter checkpoints
 cp -r <asr-checkpoint> models/asr
 mkdir -p assets/train && cp data/train/train.jsonl assets/train/
 docker build -f docker/Dockerfile -t lifemate:final .
-docker run --gpus all --network none -v $(realpath data)/public_test:/data lifemate:final
+docker run --rm --gpus all --network none -v $(realpath data)/public_test:/data -v $PWD/outputs/docker:/app/result lifemate:final
 ```
 
 Container đọc `/data` và ghi `result/submission.jsonl`. ASR chạy trước cho mọi lượt rồi giải phóng GPU, sau đó LLM mới được nạp.
@@ -129,7 +197,9 @@ Container đọc `/data` và ghi `result/submission.jsonl`. ASR chạy trước 
 src/lifemate/
 ├── data.py            # Split, Sample, nạp zaic_tools riêng cho từng split
 ├── catalog.py         # ToolSpec, render schema gọn cho prompt, JSON schema cho constrained decoding
-├── text.py, timeutil.py, config.py, pipeline.py, cli.py
+├── text.py, timeutil.py, config.py
+├── pipeline.py        # chạy agent trên một split, ghi file nộp, dừng khi lỗi liên tiếp
+├── cli.py             # lệnh `lifemate`
 ├── agent/
 │   ├── policy.py      # system prompt: định dạng hành động + chính sách gán nhãn quan sát từ train
 │   ├── prompt.py      # bối cảnh, bảng ngày, tool, few-shot, history
@@ -142,7 +212,11 @@ src/lifemate/
 ├── asr/               # TranscriptStore, Qwen3-ASR, WER và tỉ lệ sai số
 ├── eval/              # scorer (metric chính thức), splits (group k-fold, leave-apps-out), report
 └── train/             # sft_data, augment, sft_lora, rft, merge_lora, asr_data
-tests/                 # unittest; các test cần dữ liệu tự bỏ qua khi không có LIFEMATE_DATA
+tests/                 # unittest; các test cần dữ liệu tự bỏ qua khi không tìm thấy dữ liệu
+scripts/               # serve.sh, baseline.sh, train_sft_24gb.sh
+configs/               # agent.yaml, sft_lora_24gb.yaml
+docker/                # Dockerfile + entrypoint cho bài nộp cuối
+docs/                  # architecture.md, training.md
 ```
 
 ## Test
