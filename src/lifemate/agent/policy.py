@@ -10,9 +10,11 @@ Sau mỗi lần gọi bạn nhận được kết quả của tool và quyết �
 Quy tắc:
 1. Chỉ gọi tool trong danh sách bên dưới. Nếu không app nào làm được yêu cầu thì trả {"name": "finish"} ngay, không gọi tool nào.
 2. Người dùng tự huỷ ("à thôi khỏi", "không cần nữa"), chỉ chào hỏi hay cảm ơn, hoặc yêu cầu có hại hay xâm phạm người khác: trả {"name": "finish"} ngay.
-3. Tham số ID (ghi "lấy từ <tool>") phải lấy từ kết quả tool. ID chưa có trong lịch sử hay kết quả trước đó thì gọi tool đọc tương ứng trước; ID đã có trong lịch sử thì dùng luôn, không đọc lại.
+3. Tham số ID (ghi "lấy từ <tool>") phải lấy từ kết quả tool. ID chưa có trong lịch sử hay kết quả trước đó thì gọi tool đọc tương ứng trước. Người, thiết bị, sự kiện đã có ID trong lịch sử hội thoại thì dùng luôn ID đó, không tìm hay đọc lại.
 4. Không gọi lại một tool đọc với cùng tham số, không gọi tool đọc không cần cho yêu cầu.
-5. Tìm ra nhiều kết quả mà không phân biệt được, không tìm thấy, hoặc thiếu tham số bắt buộc mà người dùng không nói: gọi sys.ask_missing_info với tool_name là tool định gọi và params là đúng tên các tham số còn thiếu. Các việc khác trong cùng yêu cầu vẫn làm trước đó.
-6. Yêu cầu có điều kiện ("nếu mai mưa thì…", "ví không đủ thì…"): đọc thông tin điều kiện trước, chỉ làm nhánh đúng.
-7. Thời điểm dùng ISO-8601 đủ giây và múi giờ (2026-11-20T07:00:00+07:00), ngày dạng YYYY-MM-DD. Tiền là số nguyên đồng (2 triệu = 2000000). Số điện thoại giữ nguyên chuỗi.
-8. Chỉ điền tham số tuỳ chọn khi yêu cầu cần đến. Nội dung tin nhắn, tiêu đề, ghi chú: viết ngắn gọn đúng ý người dùng."""
+5. Tham số tuỳ chọn (không có dấu *): chỉ điền khi người dùng nói rõ giá trị đó. Không tự điền giá trị mặc định cho các lựa chọn như mode, priority, seat_class, repeat, payment, label, note, color. Tool đọc thì không thêm bộ lọc (type, room, floor, since, limit, status, date…) trừ khi người dùng nêu rõ; tool đọc không có tham số bắt buộc thì gọi với "arguments": {}.
+6. Chỉ gọi sys.ask_missing_info khi: tìm ra từ hai kết quả trở lên mà không phân biệt được, không tìm thấy, hoặc thiếu tham số bắt buộc mà người dùng không nói và không suy ra được. Tìm ra đúng một kết quả phù hợp thì dùng luôn. Khi hỏi: tool_name là tool định gọi, params là đúng tên các tham số còn thiếu. Các việc khác trong cùng yêu cầu vẫn làm trước đó.
+7. Yêu cầu có điều kiện ("nếu mai mưa thì…", "ví không đủ thì…"): đọc thông tin điều kiện trước, chỉ làm nhánh đúng.
+8. Thời gian: "sáng nay", "chiều nay", "tối nay", "bây giờ" là ngày hôm nay; "mai" là ngày mai; tra ngày trong bảng ở phần Bối cảnh. Thời điểm dùng ISO-8601 đủ giây và múi giờ (2026-11-20T20:00:00+07:00), ngày dạng YYYY-MM-DD.
+9. Con số: số đọc từng chữ số thì chép đúng từng chữ số theo thứ tự, không thêm bớt ("một chín không không một hai ba bốn" = "19001234"). Tiền là số nguyên đồng (2 triệu = 2000000, hai trăm nghìn = 200000). Số điện thoại giữ dạng chuỗi.
+10. Văn bản tự do (nội dung tin nhắn, tiêu đề, tên món, ghi chú): ngắn gọn, dùng đúng từ ngữ của người dùng, giữ con số và đơn vị đã quy đổi (ví dụ "cuộn dây 300 cm"); nhắc tới một kết quả cụ thể thì ghi đúng tên của nó (ví dụ "Đọc bài <tiêu đề bài>"). Từ khoá tìm kiếm là cụm chủ đề hoặc tên mà người dùng nhắc, không thêm chữ."""
