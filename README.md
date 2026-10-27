@@ -99,7 +99,7 @@ Hướng dẫn chi tiết từng lệnh, mốc thời gian và bảng nhật ký
 | Full fine-tune 4B | ~65 GB | Không vừa; thuê GPU 80 GB nếu cần |
 | Fine-tune Qwen3-ASR-0.6B | ~12–16 GB | Dùng recipe của Qwen3-ASR với manifest từ `asr-manifest` |
 
-Qwen3.5 dùng kiến trúc lai Gated DeltaNet; cài thêm `flash-linear-attention` và `causal-conv1d` để train nhanh hơn.
+Qwen3.5 dùng kiến trúc lai Gated DeltaNet. Cài thêm `flash-linear-attention` (không cần nvcc) để train nhanh hơn. `causal-conv1d` là tuỳ chọn và cần CUDA toolkit; xem [docs/training.md](docs/training.md#0-môi-trường-ngày-1).
 
 ## Docker (nộp bài cuối)
 

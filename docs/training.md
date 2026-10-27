@@ -18,10 +18,18 @@ VAL=outputs/sft/val_ids.txt          # tạo ở bước 1.1, dùng chung cho AS
 ```bash
 conda create -n lifemate python=3.12 -y && conda activate lifemate
 pip install -e ".[dev,yaml,vllm,asr,train]"
-pip install flash-linear-attention causal-conv1d   # kernel cho kiến trúc lai của Qwen3.5 (train nhanh hơn)
+pip install flash-linear-attention                  # kernel Triton cho Qwen3.5, không cần nvcc
+python -c "import torch; print(torch.__version__, torch.version.cuda, torch.cuda.is_available())"
 huggingface-cli download Qwen/Qwen3.5-4B --local-dir models/base/Qwen3.5-4B
 huggingface-cli download Qwen/Qwen3-ASR-0.6B --local-dir models/base/Qwen3-ASR-0.6B
 make test DATA=$DATA                                 # 34 test phải qua
+```
+
+`causal-conv1d` là tuỳ chọn, chỉ giúp train nhanh hơn. Thiếu nó, transformers tự dùng bản PyTorch thuần. Gói này cần CUDA toolkit (`nvcc`) cùng phiên bản với `torch.version.cuda`, và phải build bằng chính torch đang cài:
+
+```bash
+conda install -c nvidia cuda-nvcc=<torch.version.cuda>   # ví dụ 12.8
+pip install causal-conv1d --no-build-isolation
 ```
 
 Kiểm tra trần tham số ngay từ đầu:
