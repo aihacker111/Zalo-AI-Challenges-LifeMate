@@ -31,7 +31,7 @@ ASR_OUT=outputs/asr0_train.jsonl
 if [[ "$MIX_ASR" == 1 ]]; then DATA_DIR=outputs/sft_${HOLDOUT}_mix; else DATA_DIR=outputs/sft_${HOLDOUT}_gold; fi
 mkdir -p outputs
 
-if pgrep -u "$(id -u)" -f "vllm serve" > /dev/null; then
+if pgrep -u "$(id -u)" -f "bin/vllm serve" > /dev/null; then
   echo "a vLLM server of yours is running; stop it first (kill \$VLLM_PID) so training has the whole GPU" >&2
   exit 1
 fi
