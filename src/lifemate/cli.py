@@ -100,6 +100,8 @@ def cmd_infer(args) -> None:
     cfg = load_agent_config(args.config)
     if args.fewshot_k is not None:
         cfg.prompt.fewshot_k = args.fewshot_k
+    if args.no_constrained:
+        cfg.constrained = False
     transcripts = _transcripts(args, split)
 
     retriever = None
@@ -269,6 +271,7 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--gpu-memory-utilization", type=float, default=0.7)
     s.add_argument("--config", default=None, help="agent config (YAML or JSON)")
     s.add_argument("--fewshot-k", type=int, default=None)
+    s.add_argument("--no-constrained", action="store_true", help="disable JSON-schema constrained decoding")
     s.add_argument("--examples", default=None, help="few-shot pool: train.jsonl or its folder")
     s.add_argument("--out", required=True)
     s.add_argument("--trace", default=None, help="per-sample step trace (JSON Lines)")
