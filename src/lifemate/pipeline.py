@@ -33,10 +33,15 @@ def run(
     trace: str | Path | None = None,
     resume: bool = False,
     max_consecutive_errors: int = 5,
+    log_every: int = 10,
+    total: int | None = None,
 ) -> dict[str, float]:
     out = Path(out)
     out.parent.mkdir(parents=True, exist_ok=True)
     skip = done_ids(out) if resume else set()
+    if total is not None:
+        total = max(total - len(skip), 0)
+    log.info("running %s samples -> %s", total if total is not None else "all", out)
     mode = "a" if resume else "w"
     n = errors = streak = 0
     slowest = 0.0
@@ -71,8 +76,18 @@ def run(
                 slowest = max(slowest, result.elapsed_s)
                 if result.error:
                     log.warning("%s: %s", sample.id, result.error)
-                if n % 50 == 0:
-                    log.info("%d samples, %.2fs/sample", n, (time.monotonic() - t0) / n)
+                log.debug(
+                    "%s: %d calls, %.1fs%s",
+                    sample.id,
+                    len(result.tool_calls),
+                    result.elapsed_s,
+                    f", error: {result.error}" if result.error else "",
+                )
+                if log_every and (n == 1 or n % log_every == 0 or n == total):
+                    rate = (time.monotonic() - t0) / n
+                    eta = f", ETA {(total - n) * rate / 60:.1f} min" if total else ""
+                    done = f"{n}/{total}" if total else str(n)
+                    log.info("%s samples, %.2fs/sample, %d errors%s", done, rate, errors, eta)
     finally:
         if ftrace:
             ftrace.close()

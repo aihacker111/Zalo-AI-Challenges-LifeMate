@@ -131,7 +131,16 @@ def cmd_infer(args) -> None:
 
     agent = Agent(split, backend, cfg, retriever)
     wanted = set(_ids(args, split))
-    stats = run(agent, (s for s in split if s.id in wanted), transcripts, args.out, args.trace, args.resume)
+    stats = run(
+        agent,
+        (s for s in split if s.id in wanted),
+        transcripts,
+        args.out,
+        args.trace,
+        args.resume,
+        log_every=args.log_every,
+        total=len(wanted),
+    )
     print(json.dumps(stats, indent=2))
 
 
@@ -280,6 +289,7 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--out", required=True)
     s.add_argument("--trace", default=None, help="per-sample step trace (JSON Lines)")
     s.add_argument("--resume", action="store_true")
+    s.add_argument("--log-every", type=int, default=10, help="progress line every N samples (-v logs every sample)")
     s.add_argument("--limit", type=int, default=None)
     s.add_argument("--ids", default=None, help="comma-separated sample ids")
     s.add_argument("--ids-file", default=None, help="run only the ids listed in this file (one per line)")
