@@ -16,7 +16,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONHASHSEED=0
 
 WORKDIR /app
-RUN pip install --no-cache-dir qwen-asr soundfile
+RUN pip install --no-cache-dir "vllm[audio]"
 
 COPY pyproject.toml README.md LICENSE ./
 COPY src ./src

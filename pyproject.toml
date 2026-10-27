@@ -21,7 +21,7 @@ dependencies = []
 
 [project.optional-dependencies]
 yaml = ["pyyaml>=6"]
-asr = ["qwen-asr", "soundfile", "numpy"]
+asr = ["vllm[audio]>=0.10"]  # Qwen3-ASR runs on vLLM; the qwen-asr package is optional (transformers 4.x only)
 vllm = ["vllm>=0.10"]
 train = ["torch>=2.4", "transformers>=4.57", "peft>=0.17", "accelerate>=1.0", "pyyaml>=6"]
 dev = ["pytest>=8", "ruff>=0.6"]

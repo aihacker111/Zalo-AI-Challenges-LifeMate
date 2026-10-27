@@ -33,7 +33,7 @@ def _transcripts(args, split):
     from lifemate.asr.qwen import QwenASR
 
     asr = QwenASR(args.asr_model, backend=args.asr_backend)
-    store = transcribe_split(split, asr)
+    store = transcribe_split(split, asr, batch_size=64)
     asr.close()
     return store
 
@@ -272,7 +272,12 @@ def build_parser() -> argparse.ArgumentParser:
     def add_asr(q):
         q.add_argument("--asr", choices=["oracle", "qwen"], default="qwen")
         q.add_argument("--asr-model", default="Qwen/Qwen3-ASR-0.6B")
-        q.add_argument("--asr-backend", choices=["transformers", "vllm"], default="transformers")
+        q.add_argument(
+            "--asr-backend",
+            choices=["vllm", "qwen-asr"],
+            default="vllm",
+            help="vllm (default, works with transformers 5) or the qwen-asr package (transformers 4.x only)",
+        )
         q.add_argument("--transcripts", default=None, help="pre-computed transcripts (JSON Lines); skips ASR")
 
     s = sub.add_parser("transcribe", help="run ASR on every user turn of a split")
