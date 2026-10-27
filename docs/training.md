@@ -10,6 +10,8 @@ Trên 878 câu val, **gipformer1.5-68M chưa fine-tune** đạt WER 16,1%, tốt
 - **LLM:** SFT vẫn dùng transcript của gipformer **gốc** (`MIX_ASR=1 ASR=gipformer`, không truyền `ASR_MODEL`). Bản fine-tune đã học thuộc audio train nên gần như không sai trên train. Nếu dùng transcript của nó, LLM sẽ không thấy lỗi ASR thật như khi gặp đề.
 - **Bài nộp:** gipformer fine-tune (full) → LLM SFT (full).
 
+**Kết quả fine-tune có val** (878 câu của 10 app giữ lại, WER spoken form): gipformer gốc 15,49% → fine-tune 10 epoch, lr 0,002 là **10,14%** (giảm 35% tương đối). Lưu ý: val giữ lại theo app, không theo người nói. Nếu đề private có giọng mới, mức cải thiện thực tế có thể thấp hơn.
+
 Gipformer viết kiểu văn nói: chữ thường, không dấu câu, số đọc thành chữ ("hai mươi bốn độ"). Vì vậy:
 - Text train được chuyển sang dạng này (`src/lifemate/asr/normalize_vi.py`).
 - Bỏ 177 câu (3,5%) có cách đọc không chắc chắn, như "RV245", "VTV3", "7h30".

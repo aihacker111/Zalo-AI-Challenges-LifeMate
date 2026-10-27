@@ -236,7 +236,7 @@ Có 34 test, gồm: metric (gold = 100, rỗng = tỉ lệ OOS, thừa/thiếu m
 
 ## Ghi chú về dữ liệu
 
-- **ASR là nút thắt lớn nhất.** Trên 878 câu val (giọng thật, nhiều vùng miền), WER như sau: Qwen3-ASR-0.6B gốc 36,1%; sau fine-tune 27,0%; **gipformer1.5-68M chưa fine-tune 16,1%**. Gipformer là ASR mặc định. Vì nó chưa từng nghe audio train, transcript của nó dùng được làm input SFT (`MIX_ASR=1`).
+- **ASR là nút thắt lớn nhất.** Trên 878 câu val (giọng thật, nhiều vùng miền), WER như sau: Qwen3-ASR-0.6B gốc 36,1%; sau fine-tune 27,0%; **gipformer1.5-68M chưa fine-tune 16,1%** (15,5% khi tính ở dạng văn nói), **fine-tune trên audio train còn 10,1%**. Gipformer là ASR mặc định. Vì nó chưa từng nghe audio train, transcript của nó dùng được làm input SFT (`MIX_ASR=1`).
 
 - `train_1696` có nhãn sai: gold gửi tin tới `chat_6142`, một chat không tool nào trả về. Guard chặn call này (đúng chính sách) nên mẫu này mất điểm trong kiểm tra oracle.
 - 11 app của public_test không có trong train, nên private test nhiều khả năng cũng có app mới. Số đo quan trọng nhất là điểm trên tập leave-apps-out (`build-sft --holdout apps`).
