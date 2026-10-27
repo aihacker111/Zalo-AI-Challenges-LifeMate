@@ -37,7 +37,10 @@ OUT=${OUT:-models/gipformer-$TAG-e$EPOCH}
 RECIPE=$ICEFALL_DIR/egs/librispeech/ASR/zipformer
 export PYTHONPATH=$ICEFALL_DIR:${PYTHONPATH:-}
 
-# Dependencies, installed into the current env only when missing.
+# Dependencies, installed into the current env only when missing. pip's temp files go to the repo disk:
+# /tmp and ~/.cache are often on a small, full system disk.
+mkdir -p third_party/tmp
+export TMPDIR=$PWD/third_party/tmp PIP_NO_CACHE_DIR=1
 if ! python -c "import k2" 2>/dev/null; then
   echo "== k2 missing: installing the wheel built for this env's torch"
   python recipes/gipformer/install_k2.py
