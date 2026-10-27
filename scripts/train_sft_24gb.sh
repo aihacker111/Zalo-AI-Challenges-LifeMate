@@ -16,7 +16,8 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 
 HOLDOUT=${HOLDOUT:-apps}
-NAME=${NAME:-$([[ "$HOLDOUT" == none ]] && echo sft-full || echo sft-v1)}
+if [[ "$HOLDOUT" == none ]]; then DEFAULT_NAME=sft-full; else DEFAULT_NAME=sft-v1; fi
+NAME=${NAME:-$DEFAULT_NAME}
 EPOCHS=${EPOCHS:-1}
 MIX_ASR=${MIX_ASR:-0}
 AUGMENT_GOLD=${AUGMENT_GOLD:-1}
@@ -25,12 +26,12 @@ FEWSHOT=${FEWSHOT:-3}
 MAX_LENGTH=${MAX_LENGTH:-12288}
 BASE_MODEL=${BASE_MODEL:-models/base/Qwen3.5-4B}
 ASR_MODEL=${ASR_MODEL:-models/base/Qwen3-ASR-0.6B}
-[[ -e "$ASR_MODEL" || "$ASR_MODEL" != models/* ]] || ASR_MODEL=Qwen/Qwen3-ASR-0.6B
+if [[ ! -e "$ASR_MODEL" && "$ASR_MODEL" == models/* ]]; then ASR_MODEL=Qwen/Qwen3-ASR-0.6B; fi
 ASR_OUT=outputs/asr0_train.jsonl
-DATA_DIR=outputs/sft_${HOLDOUT}$([[ "$MIX_ASR" == 1 ]] && echo _mix)
+if [[ "$MIX_ASR" == 1 ]]; then DATA_DIR=outputs/sft_${HOLDOUT}_mix; else DATA_DIR=outputs/sft_${HOLDOUT}_gold; fi
 mkdir -p outputs
 
-if ss -ltn 2>/dev/null | grep -qE ':(8011|8000) ' && pgrep -u "$USER" -f "vllm serve" > /dev/null; then
+if pgrep -u "$(id -u)" -f "vllm serve" > /dev/null; then
   echo "a vLLM server of yours is running; stop it first (kill \$VLLM_PID) so training has the whole GPU" >&2
   exit 1
 fi
