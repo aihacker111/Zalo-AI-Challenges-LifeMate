@@ -155,6 +155,36 @@ def load_model(cfg: SFTConfig) -> Any:
         return transformers.AutoModelForImageTextToText.from_pretrained(cfg.model, **kwargs)
 
 
+def make_trainer_class(transformers: Any) -> Any:
+    """Trainer whose loss runs the LM head only on supervised positions.
+
+    Qwen3.5 has a 248K-token vocabulary: full logits for a 5K-token example take ~5 GB in fp32, although only the
+    assistant turns (a few hundred tokens) carry loss. Computing hidden states once and projecting only the labelled
+    positions removes that peak, which is what makes 12K-token examples fit on a 24 GB GPU.
+    """
+    import torch
+    import torch.nn.functional as F
+
+    class SelectiveLossTrainer(transformers.Trainer):
+        def __init__(self, *args: Any, **kwargs: Any):
+            super().__init__(*args, **kwargs)
+            self.model_accepts_loss_kwargs = False  # loss is a per-micro-batch mean; Trainer averages over accumulation
+
+        def compute_loss(self, model, inputs, return_outputs=False, num_items_in_batch=None):
+            labels = inputs.pop("labels")
+            base = model.get_base_model() if hasattr(model, "get_base_model") else model
+            out = base.model(input_ids=inputs["input_ids"], attention_mask=inputs["attention_mask"], use_cache=False)
+            hidden = out[0][:, :-1]
+            target = labels[:, 1:]
+            keep = target != -100
+            logits = base.get_output_embeddings()(hidden[keep]).float()
+            loss = F.cross_entropy(logits, target[keep]) if keep.any() else hidden.sum() * 0.0
+            return (loss, {"loss": loss}) if return_outputs else loss
+
+    del torch
+    return SelectiveLossTrainer
+
+
 def training_arguments(transformers: Any, cfg: SFTConfig, has_eval: bool, bf16: bool) -> Any:
     """TrainingArguments that work across transformers 4.x and 5.x (renamed/removed options are mapped or dropped)."""
     import inspect
@@ -179,6 +209,7 @@ def training_arguments(transformers: Any, cfg: SFTConfig, has_eval: bool, bf16: 
         "report_to": [],
         "seed": cfg.seed,
         "remove_unused_columns": False,
+        "prediction_loss_only": True,
         **cfg.extra_trainer_args,
     }
     if "warmup_ratio" in accepted:
@@ -200,6 +231,9 @@ def main(argv: list[str] | None = None) -> None:
     args = ap.parse_args(argv)
     cfg = load_config(args.config, args.overrides)
 
+    import os
+
+    os.environ.setdefault("PYTORCH_ALLOC_CONF", "expandable_segments:True")
     import torch
     import transformers
     from peft import LoraConfig, get_peft_model
@@ -222,7 +256,7 @@ def main(argv: list[str] | None = None) -> None:
     train_ds = JsonlChatDataset(cfg.train_file, tokenizer, cfg)
     eval_ds = JsonlChatDataset(cfg.eval_file, tokenizer, cfg) if cfg.eval_file and Path(cfg.eval_file).exists() else None
     targs = training_arguments(transformers, cfg, has_eval=eval_ds is not None, bf16=torch.cuda.is_available())
-    trainer = transformers.Trainer(
+    trainer = make_trainer_class(transformers)(
         model=model,
         args=targs,
         train_dataset=train_ds,
