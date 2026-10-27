@@ -253,10 +253,24 @@ def cmd_asr_eval(args) -> None:
 
 
 def cmd_asr_manifest(args) -> None:
+    from lifemate.eval.splits import leave_apps_out, pick_held_out_apps
     from lifemate.train.asr_data import build_manifests
 
-    n_train, n_val = build_manifests(_split(args), args.out_dir, val_ids_path=args.val_ids)
-    print(f"{n_train} train / {n_val} val utterances -> {args.out_dir}")
+    split = _split(args)
+    out = Path(args.out_dir)
+    out.mkdir(parents=True, exist_ok=True)
+    val_ids_path = args.val_ids
+    if val_ids_path is None and args.holdout == "apps":  # same validation samples as `build-sft --holdout apps`
+        held = pick_held_out_apps(split.samples, args.n_apps, args.seed)
+        _, val_ids = leave_apps_out(split.samples, held)
+        val_ids_path = out / "val_ids.txt"
+        val_ids_path.write_text("\n".join(sorted(val_ids)) + "\n", encoding="utf-8")
+        print(f"held-out apps: {', '.join(sorted(held))} ({len(val_ids)} samples) -> {val_ids_path}")
+    if args.holdout == "none" and val_ids_path is None:
+        val_ids_path = out / "val_ids.txt"
+        val_ids_path.write_text("", encoding="utf-8")  # every utterance goes to train
+    n_train, n_val = build_manifests(split, out, val_ids_path=val_ids_path)
+    print(f"{n_train} train / {n_val} val utterances -> {out}")
 
 
 # -- parser --------------------------------------------------------------------------------------
@@ -357,7 +371,10 @@ def build_parser() -> argparse.ArgumentParser:
     s = sub.add_parser("asr-manifest", help="ASR fine-tuning manifests from train")
     _add_data(s)
     s.add_argument("--out-dir", default="outputs/asr")
-    s.add_argument("--val-ids", default=None, help="sample ids for the validation manifest (default: 5%% hashed)")
+    s.add_argument("--val-ids", default=None, help="sample ids for the validation manifest (overrides --holdout)")
+    s.add_argument("--holdout", choices=["apps", "none"], default="apps", help="apps: same val samples as build-sft; none: all to train")
+    s.add_argument("--n-apps", type=int, default=10)
+    s.add_argument("--seed", type=int, default=0)
     s.set_defaults(func=cmd_asr_manifest)
     return p
 

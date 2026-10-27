@@ -117,7 +117,7 @@ Nộp `outputs/sub_base.jsonl`, rồi so điểm leaderboard với điểm val �
 ## 2. Fine-tune ASR (ngày 2–4, nếu cần)
 
 ```bash
-lifemate asr-manifest --data $DATA --out-dir outputs/asr --val-ids $VAL   # cùng tập val với LLM
+lifemate asr-manifest --data $DATA --out-dir outputs/asr   # tự giữ lại đúng tập val của LLM (--holdout apps)
 git clone https://github.com/QwenLM/Qwen3-ASR.git third_party/Qwen3-ASR
 # qwen-asr (dùng cho script fine-tune) chỉ chạy với transformers 4.x: dùng một môi trường riêng
 conda create -n asrft python=3.12 -y && conda activate asrft && pip install -U qwen-asr datasets
