@@ -25,7 +25,8 @@ if [[ ! -e "$ASR_MODEL" && "$ASR_MODEL" == models/* ]]; then
   echo "$ASR_MODEL not found locally, using Qwen/Qwen3-ASR-0.6B from the Hub"
   ASR_MODEL=Qwen/Qwen3-ASR-0.6B
 fi
-TRANSCRIPTS=${TRANSCRIPTS:-$OUT_DIR/asr_$(basename "$ASR_MODEL").jsonl}
+ASR_TAG=$(echo "$ASR_MODEL" | sed 's#^models/base/##; s#^checkpoints/##; s#[/:]#_#g')
+TRANSCRIPTS=${TRANSCRIPTS:-$OUT_DIR/asr_${ASR_TAG}.jsonl}
 SUB="$OUT_DIR/submission_${TAG}.jsonl"
 
 echo "== 1/3 ASR ($ASR_MODEL)"

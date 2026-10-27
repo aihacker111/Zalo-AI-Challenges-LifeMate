@@ -1,261 +1,241 @@
-# Quy trình huấn luyện (1 GPU 24 GB)
+# Quy trình đầy đủ: từ dữ liệu tới bài nộp
 
-Mục tiêu: có Docker nộp trước **23:59 ngày 16/11**. Mọi quyết định đều dựa trên số đo của **cùng một tập val**, và mọi số đo đều ghi vào bảng nhật ký ở cuối file.
+Hệ thống gồm hai model chạy nối tiếp. Mọi bài nộp đều đi qua cả hai:
 
-Quy ước dùng trong file này:
-
-```bash
-cd ~/Desktop/Zalo-AI-Challenges-LifeMate
-ln -s ~/Downloads/train+public_test data   # một lần; "data" đã nằm trong .gitignore
-DATA=data
-VAL=outputs/sft/val_ids.txt          # tạo ở bước 1.1, dùng chung cho ASR và LLM
 ```
+audio → ASR (Qwen3-ASR-0.6B, fine-tune) → transcript → LLM agent (Qwen3.5-4B + LoRA) → tool calls → file nộp
+```
+
+Mỗi model được train riêng vì sửa một loại lỗi riêng:
+- **ASR**: nghe sai. Bản gốc có WER khoảng 37% trên audio train.
+- **LLM**: làm sai quy trình. Dù transcript hoàn hảo, bản gốc chỉ đạt 41,76 điểm trên val.
+
+Mỗi model đi qua hai vòng:
+1. **Vòng thử nghiệm:** chừa ra tập val (274 mẫu, 10 app), để đo được điểm.
+2. **Vòng cuối:** train trên toàn bộ train, dùng cho bài nộp.
+
+Cả hai model dùng **cùng một tập val**, nên các con số so sánh trực tiếp được với nhau.
+
+Chỉ có một GPU 24 GB: mọi bước chạy **lần lượt**. Trước mỗi bước train, tắt vLLM bằng `kill $VLLM_PID`. Các bước dài nên chạy trong `tmux`.
+
+| Phần | Việc | Thời gian ước tính |
+|---|---|---|
+| 0 | Chuẩn bị (một lần) | 30 phút |
+| 1 | ASR: fine-tune + đo trên val | ~1,5 giờ |
+| 2 | LLM: SFT + đo trên val | ~3,5 giờ |
+| 3 | Đo toàn hệ thống trên val, nộp public | ~40 phút |
+| 4 | Bản cuối: ASR + LLM trên toàn bộ train, nộp public | ~5 giờ |
+| 5 | Docker (trước 23:59 ngày 16/11) | 1–2 giờ |
+| 6 | Private test (20–23/11) | ~30 phút |
 
 ---
 
-## 0. Môi trường (ngày 1)
+## Phần 0 — Chuẩn bị (một lần)
 
 ```bash
-conda create -n lifemate python=3.12 -y && conda activate lifemate
-pip install -e ".[dev,yaml,vllm,asr,train]"
-pip install flash-linear-attention                  # kernel Triton cho Qwen3.5, không cần nvcc
-python -c "import torch; print(torch.__version__, torch.version.cuda, torch.cuda.is_available())"
+cd /media/hung/HDD2/workplaces/tin/Zalo-AI-Challenges-LifeMate
+git pull
+
+# Môi trường chính: agent, vLLM, train LLM
+conda activate lifemate
+pip install -e ".[dev,yaml,vllm,asr,train]" flash-linear-attention
+
+# Dữ liệu và model gốc
+ln -s /đường/dẫn/tới/train+public_test data                 # nếu chưa có
 huggingface-cli download Qwen/Qwen3.5-4B --local-dir models/base/Qwen3.5-4B
 huggingface-cli download Qwen/Qwen3-ASR-0.6B --local-dir models/base/Qwen3-ASR-0.6B
-make test DATA=$DATA                                 # 34 test phải qua
-```
+make test                                                    # 34 test phải qua
 
-`causal-conv1d` là tuỳ chọn, chỉ giúp train nhanh hơn. Thiếu nó, transformers tự dùng bản PyTorch thuần. Gói này cần CUDA toolkit (`nvcc`) cùng phiên bản với `torch.version.cuda`, và phải build bằng chính torch đang cài:
-
-```bash
-conda install -c nvidia cuda-nvcc=<torch.version.cuda>   # ví dụ 12.8
-pip install causal-conv1d --no-build-isolation
-```
-
-Máy dùng chung có thể có dịch vụ khác giữ cổng 8000. Mọi lệnh bên dưới dùng `scripts/serve.sh` với cổng 8011, và truyền `--base-url $BASE_URL` cho `infer`. **Không dùng `pkill -f` với chuỗi ngắn**; tắt server của mình bằng `kill $VLLM_PID`.
-
-Kiểm tra trần tham số ngay từ đầu:
-
-```bash
-python - <<'PY'
-import torch, transformers
-for p in ["models/base/Qwen3.5-4B"]:
-    m = transformers.AutoModelForImageTextToText.from_pretrained(p, torch_dtype=torch.bfloat16)
-    total = sum(x.numel() for x in m.parameters())
-    vision = sum(x.numel() for n, x in m.named_parameters() if "visual" in n)
-    print(p, f"total {total/1e9:.2f}B, vision {vision/1e9:.2f}B, text {(total-vision)/1e9:.2f}B")
-PY
-```
-
----
-
-## 1. Đo trước khi train (ngày 1–2)
-
-### 1.1 Tạo tập val cố định
-
-Chia leave-apps-out: giữ lại 10 app, khoảng 274 mẫu. Tập này mô phỏng việc private test có app mới.
-
-```bash
-lifemate build-sft --data $DATA --asr oracle --holdout apps --n-apps 10 --out-dir outputs/sft
-```
-
-### 1.2 Chạy thử (20 mẫu)
-
-```bash
-nvidia-smi --query-gpu=memory.used,memory.total --format=csv   # máy dùng chung: chừa VRAM cho người khác
-source scripts/serve.sh models/base/Qwen3.5-4B base 8011 0.85   # in đuôi log và dừng nếu vLLM chết khi khởi động
-lifemate infer --data $DATA --split train --backend openai --model base --base-url $BASE_URL --asr oracle \
-  --limit 20 --out outputs/smoke.jsonl --trace outputs/smoke.trace.jsonl
-lifemate score --data $DATA --split train --submission outputs/smoke.jsonl --only-submitted
-```
-
-Lỗi API của vLLM, structured outputs hay chat template sẽ lộ ra ở bước này. Mở `smoke.trace.jsonl` xem model sinh gì ở từng bước.
-
-### 1.3 Baseline LLM trên val (transcript gold)
-
-```bash
-for K in 0 3; do
-  lifemate infer --data $DATA --split train --backend openai --model base --base-url $BASE_URL --asr oracle \
-    --ids-file $VAL --exclude-ids $VAL --fewshot-k $K --out outputs/base_k$K.jsonl --trace outputs/base_k$K.trace.jsonl
-  lifemate score --data $DATA --split train --submission outputs/base_k$K.jsonl --ids-file $VAL
-done
-```
-
-`--exclude-ids` là bắt buộc: thiếu nó, few-shot sẽ lấy chính các câu val làm ví dụ và điểm cao giả.
-
-### 1.4 ASR zero-shot
-
-```bash
-kill $VLLM_PID   # tắt vLLM để nhường GPU cho ASR
-lifemate transcribe --data $DATA --split train --asr qwen --asr-model models/base/Qwen3-ASR-0.6B --out outputs/asr0_train.jsonl
-lifemate transcribe --data $DATA --split public_test --asr qwen --asr-model models/base/Qwen3-ASR-0.6B --out outputs/asr0_public.jsonl
-lifemate asr-eval --data $DATA --transcripts outputs/asr0_train.jsonl --ids-file $VAL
-```
-
-Sau đó chạy lại 1.3 với `--transcripts outputs/asr0_train.jsonl` thay cho `--asr oracle`. **Chênh lệch giữa hai lần chính là phần điểm mất do ASR.**
-
-### 1.5 Một bài nộp public để hiệu chỉnh
-
-```bash
-lifemate infer --data $DATA --split public_test --backend openai --model base --base-url $BASE_URL \
-  --transcripts outputs/asr0_public.jsonl --fewshot-k 3 --out outputs/sub_base.jsonl
-lifemate validate --data $DATA --split public_test --submission outputs/sub_base.jsonl
-```
-
-Nộp `outputs/sub_base.jsonl`, rồi so điểm leaderboard với điểm val ở 1.4.
-
-**Quyết định sau bước 1:**
-
-| Quan sát | Làm tiếp |
-|---|---|
-| Điểm val (ASR) cách điểm val (gold) > 5 | Ưu tiên bước 2 (ASR) |
-| Lỗi chủ yếu là `extra_read`, `missing_read`, `ask_mismatch`, `oos_*` | Bước 3 (SFT LLM) |
-| Lỗi `wrong_final_state` với số tiền/giờ sai | Xem trace: lỗi do ASR thì bước 2, do model thì bước 3 |
-
----
-
-## 2. Fine-tune ASR (ngày 2–4, nếu cần)
-
-```bash
-lifemate asr-manifest --data $DATA --out-dir outputs/asr   # tự giữ lại đúng tập val của LLM (--holdout apps)
+# Môi trường riêng để fine-tune ASR (script của Qwen chỉ chạy với transformers 4.x)
 git clone https://github.com/QwenLM/Qwen3-ASR.git third_party/Qwen3-ASR
-# qwen-asr (dùng cho script fine-tune) chỉ chạy với transformers 4.x: dùng một môi trường riêng
-conda create -n asrft python=3.12 -y && conda activate asrft && pip install -U qwen-asr datasets
+conda create -n asrft python=3.12 -y
+conda activate asrft && pip install -U qwen-asr datasets && conda activate lifemate
+```
+
+Máy dùng chung: cổng 8000 đã có dịch vụ khác, nên mọi lệnh dùng cổng 8011 qua `scripts/serve.sh`. Không dùng `pkill -f` với chuỗi ngắn.
+
+---
+
+## Phần 1 — ASR
+
+### 1.1 Transcript của ASR gốc (mốc so sánh)
+
+```bash
+conda activate lifemate
+lifemate transcribe --split train --asr qwen --asr-model models/base/Qwen3-ASR-0.6B --out outputs/asr0_train.jsonl
+```
+
+### 1.2 Dữ liệu fine-tune (chừa tập val)
+
+```bash
+lifemate asr-manifest --split train --out-dir outputs/asr_ft
+# → outputs/asr_ft/train.jsonl (4.158 câu), val.jsonl (878 câu), val_ids.txt (274 mẫu)
+```
+
+### 1.3 Fine-tune
+
+```bash
+conda activate asrft
 python third_party/Qwen3-ASR/finetuning/qwen3_asr_sft.py \
   --model_path models/base/Qwen3-ASR-0.6B \
-  --train_file outputs/asr/train.jsonl --eval_file outputs/asr/val.jsonl \
-  --output_dir checkpoints/asr --batch_size 8 --grad_acc 8 --lr 1e-5 --epochs 3 \
-  --save_steps 100 --save_total_limit 3
+  --train_file outputs/asr_ft/train.jsonl --eval_file outputs/asr_ft/val.jsonl \
+  --output_dir checkpoints/asr-ft --batch_size 8 --grad_acc 4 --lr 1e-5 --epochs 3 \
+  --save_steps 200 --save_total_limit 3
 ```
 
-Chọn checkpoint tốt nhất bằng `asr-eval --ids-file $VAL`. Nhìn chủ yếu vào **tỉ lệ sai số**, không chỉ WER:
+### 1.4 Đo trên val
 
 ```bash
-lifemate transcribe --data $DATA --split train --asr qwen --asr-model checkpoints/asr/checkpoint-XXX --out outputs/asr1_train.jsonl
-lifemate asr-eval --data $DATA --transcripts outputs/asr1_train.jsonl --ids-file $VAL
+conda activate lifemate
+CKPT=checkpoints/asr-ft/checkpoint-XXX                       # checkpoint cuối, hoặc có eval loss thấp nhất
+cp -n models/base/Qwen3-ASR-0.6B/*.json "$CKPT"/             # bổ sung file cấu hình nếu thiếu, không ghi đè
+lifemate transcribe --split train --asr qwen --asr-model "$CKPT" --out outputs/asr1_train.jsonl
+lifemate asr-eval --split train --transcripts outputs/asr0_train.jsonl --ids-file outputs/asr_ft/val_ids.txt
+lifemate asr-eval --split train --transcripts outputs/asr1_train.jsonl --ids-file outputs/asr_ft/val_ids.txt
 ```
 
-Lưu ý:
-- Chỉ có 6,8 giờ audio, nên dễ overfit. Giữ lr thấp và dừng sớm khi WER val tăng trở lại.
-- **Không dùng transcript của ASR đã fine-tune trên chính câu train làm input SFT.** Các câu đó model đã thuộc, nên transcript sạch hơn thực tế. Input SFT lấy từ `asr0_train.jsonl` (bản zero-shot, nhiễu như thật hoặc hơn), trộn với transcript gold.
+**Chỉ tin số đo trên val.** Trên câu train, ASR đã học thuộc nên WER đẹp giả. Nếu WER giảm ít, thử tăng `--epochs` hoặc đổi `--lr`, rồi đo lại.
 
 ---
 
-## 3. LoRA SFT cho LLM (ngày 3–7)
+## Phần 2 — LLM
 
-### 3.1 Dữ liệu
+### 2.1 Dữ liệu SFT và train
 
-Có hai nguồn input: transcript gold và transcript ASR zero-shot. Cả hai dùng cùng tập val và cùng augment đổi tên tool.
+Dữ liệu SFT chỉ dùng transcript gold (`MIX_ASR=0`, mặc định), và chừa cùng tập val.
 
 ```bash
-lifemate build-sft --data $DATA --asr oracle --holdout apps --n-apps 10 --augment 2 --fewshot-k 3 --out-dir outputs/sft_gold
-lifemate build-sft --data $DATA --transcripts outputs/asr0_train.jsonl --holdout apps --n-apps 10 --augment 1 --fewshot-k 3 --out-dir outputs/sft_asr
-cat outputs/sft_gold/train.jsonl outputs/sft_asr/train.jsonl | shuf --random-source=<(yes) > outputs/sft/train.jsonl
-cp outputs/sft_asr/val.jsonl outputs/sft/val.jsonl
-cmp outputs/sft_gold/val_ids.txt $VAL && echo "val không đổi"
+kill $VLLM_PID 2>/dev/null
+tmux new -s train
+bash scripts/train_sft_24gb.sh                     # → outputs/sft_apps_gold/, checkpoints/sft-v1
 ```
 
-### 3.2 Train
+Nếu bị OOM, chạy lại với `MAX_LENGTH=8192 bash scripts/train_sft_24gb.sh`.
+
+### 2.2 Đo trên val, transcript gold (mốc: 41,76)
 
 ```bash
-python -m lifemate.train.sft_lora --config configs/sft_lora_24gb.yaml output_dir=checkpoints/sft-v1
-```
-
-Thời gian khoảng 2–4 giờ cho 2 epoch. Nếu OOM: giảm `max_length=8192`, `lora_r=32`, hoặc dùng QLoRA. Dòng log đầu tiên cho biết bao nhiêu mẫu bị bỏ vì quá dài; con số này nên bằng 0.
-
-### 3.3 Đánh giá trên val
-
-```bash
-vllm serve models/base/Qwen3.5-4B --served-model-name base --enable-lora --max-lora-rank 64 \
-  --lora-modules sft-v1=checkpoints/sft-v1 --max-model-len 16384 --enable-prefix-caching --seed 0 &
-lifemate infer --data $DATA --split train --backend openai --model sft-v1 \
-  --transcripts outputs/asr0_train.jsonl --ids-file $VAL --exclude-ids $VAL \
+source scripts/serve.sh models/base/Qwen3.5-4B base 8011 0.85 \
+  --enable-lora --max-lora-rank 64 --lora-modules sft-v1=checkpoints/sft-v1
+lifemate infer --split train --backend openai --model sft-v1 --asr oracle \
+  --ids-file outputs/asr_ft/val_ids.txt --exclude-ids outputs/asr_ft/val_ids.txt --fewshot-k 3 \
   --out outputs/sft-v1_val.jsonl --trace outputs/sft-v1_val.trace.jsonl
-lifemate score --data $DATA --split train --submission outputs/sft-v1_val.jsonl --ids-file $VAL --report outputs/sft-v1_val.scores.jsonl
+lifemate score --split train --submission outputs/sft-v1_val.jsonl --ids-file outputs/asr_ft/val_ids.txt \
+  --report outputs/sft-v1_val.scores.jsonl
+lifemate inspect --split train --report outputs/sft-v1_val.scores.jsonl --show 15 > outputs/sft-v1_val.inspect.txt
 ```
 
-Nếu vLLM chưa hỗ trợ LoRA cho Qwen3.5, gộp adapter vào model gốc rồi serve bản gộp:
-`python -m lifemate.train.merge_lora --base models/base/Qwen3.5-4B --adapter checkpoints/sft-v1 --out models/sft-v1`.
-
-### 3.4 Thử nghiệm (mỗi lần đổi **một** yếu tố)
-
-| Thử | Giá trị |
-|---|---|
-| `learning_rate` | 5e-5 · **1e-4** · 2e-4 |
-| `num_train_epochs` | 1 · **2** · 3 |
-| `--augment` | 0 · **2** · 4 |
-| `--fewshot-k` (train và infer giống nhau) | 0 · **3** |
-
-Giữ cấu hình có điểm val cao nhất. Đọc thêm phân loại lỗi để biết lần sửa tiếp theo nên nhắm vào đâu.
+Nếu vLLM không nạp được LoRA, gộp adapter vào model gốc rồi serve bản đã gộp:
+```bash
+python -m lifemate.train.merge_lora --base models/base/Qwen3.5-4B --adapter checkpoints/sft-v1 --out models/sft-v1
+source scripts/serve.sh models/sft-v1 sft-v1 8011 0.85
+```
 
 ---
 
-## 4. Train lại trên toàn bộ train (ngày 7–8)
+## Phần 3 — Toàn hệ thống trên val, rồi nộp public
 
-Khi đã chọn được cấu hình, dựng lại dữ liệu với `--holdout none`, train với đúng cấu hình đó, rồi gộp adapter:
+### 3.1 ASR fine-tune → LLM SFT trên val
+
+Server từ bước 2.2 vẫn đang chạy:
 
 ```bash
-lifemate build-sft --data $DATA --asr oracle --holdout none --augment 2 --fewshot-k 3 --out-dir outputs/sft_full_gold
-lifemate build-sft --data $DATA --transcripts outputs/asr0_train.jsonl --holdout none --augment 1 --fewshot-k 3 --out-dir outputs/sft_full_asr
-cat outputs/sft_full_*/train.jsonl | shuf --random-source=<(yes) > outputs/sft_full.jsonl
-python -m lifemate.train.sft_lora --config configs/sft_lora_24gb.yaml train_file=outputs/sft_full.jsonl eval_file=null output_dir=checkpoints/sft-full
+lifemate infer --split train --backend openai --model sft-v1 --transcripts outputs/asr1_train.jsonl \
+  --ids-file outputs/asr_ft/val_ids.txt --exclude-ids outputs/asr_ft/val_ids.txt --fewshot-k 3 \
+  --out outputs/e2e_v1_val.jsonl --trace outputs/e2e_v1_val.trace.jsonl
+lifemate score --split train --submission outputs/e2e_v1_val.jsonl --ids-file outputs/asr_ft/val_ids.txt
+kill $VLLM_PID
+```
+
+Đây là con số gần với điểm public nhất. Khoảng cách tới điểm ở 2.2 (transcript gold) là phần ASR còn làm mất.
+
+### 3.2 Nộp public
+
+```bash
+ASR_MODEL=checkpoints/asr-ft/checkpoint-XXX LORA=checkpoints/sft-v1 bash scripts/predict_public.sh
+```
+
+Script chạy ASR → vLLM → agent → kiểm tra định dạng. Upload `outputs/public_test/submission_sft-v1.jsonl` khi thấy `submission ready … (634 lines)`.
+
+---
+
+## Phần 4 — Bản cuối: train trên toàn bộ train
+
+Dùng đúng cấu hình đã cho kết quả tốt nhất ở Phần 1–3.
+
+```bash
+# ASR trên cả 5.036 câu
+lifemate asr-manifest --split train --out-dir outputs/asr_full --holdout none
+conda activate asrft
+python third_party/Qwen3-ASR/finetuning/qwen3_asr_sft.py --model_path models/base/Qwen3-ASR-0.6B \
+  --train_file outputs/asr_full/train.jsonl --output_dir checkpoints/asr-full \
+  --batch_size 8 --grad_acc 4 --lr 1e-5 --epochs 3 --save_steps 200 --save_total_limit 2
+conda activate lifemate
+cp -n models/base/Qwen3-ASR-0.6B/*.json checkpoints/asr-full/checkpoint-YYY/
+
+# LLM trên cả 1.545 mẫu
+HOLDOUT=none bash scripts/train_sft_24gb.sh        # → checkpoints/sft-full
+
+# Nộp public
+ASR_MODEL=checkpoints/asr-full/checkpoint-YYY LORA=checkpoints/sft-full bash scripts/predict_public.sh
+```
+
+Các bản này đã học cả tập val, nên chỉ đánh giá được qua public leaderboard.
+
+---
+
+## Phần 5 — Docker (hạn 23:59 ngày 16/11)
+
+```bash
+# 1. Gộp LoRA, chuẩn bị model và dữ liệu few-shot
 python -m lifemate.train.merge_lora --base models/base/Qwen3.5-4B --adapter checkpoints/sft-full --out models/llm
-```
+cp -r checkpoints/asr-full/checkpoint-YYY models/asr
+mkdir -p assets/train && cp data/train/train.jsonl assets/train/
 
-Nộp public một lần với `models/llm` (giống bước 1.5) để xác nhận điểm có tăng.
+# 2. Kiểm tra tổng tham số dưới 6B và LLM dưới 5B
+python - <<'PY'
+import torch, transformers
+for p in ["models/llm", "models/asr"]:
+    try:
+        m = transformers.AutoModelForImageTextToText.from_pretrained(p, dtype=torch.bfloat16)
+    except Exception:
+        m = transformers.AutoModel.from_pretrained(p, dtype=torch.bfloat16, trust_remote_code=True)
+    total = sum(x.numel() for x in m.parameters())
+    vision = sum(x.numel() for n, x in m.named_parameters() if "visual" in n)
+    print(p, f"total {total/1e9:.2f}B, vision {vision/1e9:.2f}B")
+PY
 
----
-
-## 5. RFT (ngày 8–11, nếu còn thời gian)
-
-Làm thí nghiệm trên tập val trước. Model dùng ở đây phải được train **không** có val (`sft-v1`, gộp thành `models/sft-v1`):
-
-```bash
-vllm serve models/sft-v1 --served-model-name sft-v1 --max-model-len 16384 --enable-prefix-caching &
-python -m lifemate.train.rft --data $DATA --base-url http://localhost:8000/v1 --model sft-v1 \
-  --transcripts outputs/asr0_train.jsonl --samples 4 --temperature 0.7 --out outputs/rft/train_all.jsonl
-grep -v -F -f <(sed 's/^/"id": "/' $VAL) outputs/rft/train_all.jsonl > outputs/rft/train.jsonl   # bỏ mẫu val
-cat outputs/sft/train.jsonl outputs/rft/train.jsonl > outputs/sft_rft.jsonl
-python -m lifemate.train.sft_lora --config configs/sft_lora_24gb.yaml train_file=outputs/sft_rft.jsonl output_dir=checkpoints/rft-v1
-```
-
-Đánh giá như 3.3. Chỉ giữ RFT nếu điểm val tăng; khi đó lặp lại bước 4 với dữ liệu RFT sinh trên toàn bộ train.
-
----
-
-## 6. Docker (ngày 12–15)
-
-```bash
-cp -r checkpoints/asr/checkpoint-XXX models/asr        # hoặc models/base/Qwen3-ASR-0.6B nếu không fine-tune ASR
-mkdir -p assets/train && cp $DATA/train/train.jsonl assets/train/
+# 3. Build và chạy thử offline trên public_test
 docker build -f docker/Dockerfile -t lifemate:final .
-time docker run --rm --gpus all --network none -v $(realpath $DATA)/public_test:/data -v $PWD/outputs/docker:/app/result lifemate:final
+time docker run --rm --gpus all --network none \
+  -v $(realpath data)/public_test:/data -v $PWD/outputs/docker:/app/result lifemate:final
 ```
 
-Kiểm tra trước khi nộp:
+Trước khi nộp, kiểm tra:
 - `validate` báo `OK`.
-- Chạy 2 lần cho cùng một file (kiểm tra tính xác định).
-- Trung bình dưới 30 giây mỗi mẫu; xem `slowest_s` trong log.
-- Tổng tham số dưới 6B (bước 0).
-- Nộp public từ chính output của Docker.
+- Chạy 2 lần cho cùng một kết quả.
+- Trung bình dưới 30 giây mỗi mẫu.
+- Điểm public của `outputs/docker/submission.jsonl` khớp với bản nộp ở Phần 4.
 
-Hạn: **23:59 ngày 16/11**, tối đa 2 lần nộp Docker.
+Nộp qua form "Solution Submission", tối đa 2 lần, gửi kèm checksum và link Google Drive.
 
-## 7. Private test (20–23/11)
+## Phần 6 — Private test (20–23/11)
 
 ```bash
-docker run --rm --gpus all --network none -v /path/to/private_test:/data -v $PWD/outputs/private:/app/result lifemate:final
+docker run --rm --gpus all --network none \
+  -v /đường/dẫn/private_test:/data -v $PWD/outputs/private:/app/result lifemate:final
 ```
 
-Nộp `outputs/private/submission.jsonl`. Không sửa gì giữa Docker đã nộp và lần chạy này.
+Nộp `outputs/private/submission.jsonl` trước 23:59 ngày 23/11. Không sửa gì giữa Docker đã nộp và lần chạy này.
 
 ---
 
 ## Nhật ký thí nghiệm
 
-| Ngày | Thí nghiệm | Val (gold) | Val (ASR) | Public | Ghi chú |
-|---|---|---|---|---|---|
-| | base k=0 | | | | |
-| | base k=3 | | | | |
-| | ASR zero-shot: WER / sai số | | | | |
-| | sft-v1 | | | | |
+| Ngày | Cấu hình | WER val | Val (gold) | Val (ASR) | Public | Ghi chú |
+|---|---|---|---|---|---|---|
+| 27/10 | ASR gốc + LLM gốc, prompt v1 | 36,7%* | 36,10 | | | *WER trên toàn train |
+| 27/10 | ASR gốc + LLM gốc, prompt v2 | | 41,76 | | | |
+| | ASR fine-tune + LLM gốc | | | | | |
+| | ASR fine-tune + sft-v1 | | | | | |
+| | asr-full + sft-full | | | | | |
