@@ -20,7 +20,25 @@ def _split(args):
     return Split.resolve(args.data, args.split)
 
 
-def _transcripts(args, split):
+ASR_ENGINES = ("qwen", "gipformer", "chunkformer")
+
+
+def make_asr(engine: str, model: str | None, backend: str = "vllm"):
+    """ASR engine by name; ``model`` defaults to the engine's reference checkpoint."""
+    if engine == "gipformer":
+        from lifemate.asr.vietnamese import GIPFORMER, TransducerASR
+
+        return TransducerASR(model or GIPFORMER)
+    if engine == "chunkformer":
+        from lifemate.asr.vietnamese import CHUNKFORMER, ChunkFormerASR
+
+        return ChunkFormerASR(model or CHUNKFORMER)
+    from lifemate.asr.qwen import QwenASR
+
+    return QwenASR(model or "Qwen/Qwen3-ASR-0.6B", backend=backend)
+
+
+def _transcripts(args, split, ids=None):
     from lifemate.asr import TranscriptStore, oracle_transcripts
 
     if args.transcripts:
@@ -30,10 +48,9 @@ def _transcripts(args, split):
             sys.exit("--asr oracle needs a labelled split; pass --transcripts for test splits")
         return oracle_transcripts(split)
     from lifemate.asr.base import transcribe_split
-    from lifemate.asr.qwen import QwenASR
 
-    asr = QwenASR(args.asr_model, backend=args.asr_backend)
-    store = transcribe_split(split, asr, batch_size=64)
+    asr = make_asr(args.asr, args.asr_model, args.asr_backend)
+    store = transcribe_split(split, asr, batch_size=64, ids=ids)
     asr.close()
     return store
 
@@ -84,7 +101,8 @@ def cmd_stats(args) -> None:
 
 def cmd_transcribe(args) -> None:
     split = _split(args)
-    store = _transcripts(args, split)
+    ids = _read_ids(args.ids_file) if args.ids_file else None
+    store = _transcripts(args, split, ids=ids)
     store.save(args.out)
     print(f"{len(store)} transcripts -> {args.out}")
 
@@ -284,8 +302,8 @@ def build_parser() -> argparse.ArgumentParser:
     s.set_defaults(func=cmd_stats)
 
     def add_asr(q):
-        q.add_argument("--asr", choices=["oracle", "qwen"], default="qwen")
-        q.add_argument("--asr-model", default="Qwen/Qwen3-ASR-0.6B")
+        q.add_argument("--asr", choices=["oracle", *ASR_ENGINES], default="qwen", help="ASR engine (oracle = gold transcripts)")
+        q.add_argument("--asr-model", default=None, help="checkpoint or HF repo (default: the engine's reference model)")
         q.add_argument(
             "--asr-backend",
             choices=["vllm", "qwen-asr"],
@@ -298,6 +316,7 @@ def build_parser() -> argparse.ArgumentParser:
     _add_data(s, "public_test")
     add_asr(s)
     s.add_argument("--out", required=True)
+    s.add_argument("--ids-file", default=None, help="transcribe only the user turns of these samples (e.g. a val split)")
     s.set_defaults(func=cmd_transcribe)
 
     s = sub.add_parser("infer", help="run the agent and write a submission")

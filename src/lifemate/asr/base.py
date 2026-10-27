@@ -43,10 +43,18 @@ def oracle_transcripts(samples: Iterable[Sample]) -> TranscriptStore:
     return store
 
 
-def transcribe_split(split: Split, transcriber: Transcriber, batch_size: int = 32, store: TranscriptStore | None = None) -> TranscriptStore:
-    """Transcribe every user turn of a split (history turns included), skipping paths already in ``store``."""
+def transcribe_split(
+    split: Split,
+    transcriber: Transcriber,
+    batch_size: int = 32,
+    store: TranscriptStore | None = None,
+    ids: Iterable[str] | None = None,
+) -> TranscriptStore:
+    """Transcribe every user turn of a split (history turns included), skipping paths already in ``store``.
+    ``ids`` restricts the work to some samples (e.g. the validation set when comparing engines)."""
     store = store if store is not None else TranscriptStore()
-    todo = sorted({p for s in split for p in s.user_turn_audio()} - set(store))
+    wanted = set(ids) if ids is not None else None
+    todo = sorted({p for s in split if wanted is None or s.id in wanted for p in s.user_turn_audio()} - set(store))
     for i in range(0, len(todo), batch_size):
         chunk = todo[i : i + batch_size]
         texts = transcriber.transcribe([split.audio_path(p) for p in chunk])

@@ -113,7 +113,7 @@ File nộp nằm ở `outputs/public_test/submission_<tên model>.jsonl`. Các t
 | Lệnh | Việc | Tuỳ chọn đáng chú ý |
 |---|---|---|
 | `stats` | Thống kê split | |
-| `transcribe` | ASR mọi lượt user (cả history), lưu JSON Lines | `--asr qwen\|oracle`, `--asr-model` |
+| `transcribe` | ASR mọi lượt user (cả history), lưu JSON Lines | `--asr qwen\|gipformer\|chunkformer\|oracle`, `--asr-model`, `--ids-file` |
 | `infer` | Chạy agent, ghi submission | `--backend vllm\|openai\|oracle`, `--base-url`, `--fewshot-k`, `--ids-file`, `--exclude-ids`, `--limit`, `--trace`, `--resume`, `--no-constrained`, `--config` |
 | `score` | Chấm trên split có nhãn, kèm phân loại lỗi | `--ids-file`, `--only-submitted`, `--report` |
 | `inspect` | Đọc file `--report` của `score`: call và tham số lệch nhiều nhất, kèm ví dụ | `--show`, `--label` |
@@ -134,6 +134,7 @@ Với backend `openai`, `infer` kiểm tra server và tên model trước khi ch
 | Script | Việc |
 |---|---|
 | `scripts/serve.sh` | Khởi động vLLM, chờ sẵn sàng, export `BASE_URL`/`VLLM_PID` |
+| `scripts/asr_benchmark.sh` | So sánh các engine ASR trên 878 câu val (WER, sai số, thời gian) |
 | `scripts/predict_public.sh` | ASR → vLLM → agent → validate, ra file nộp cho public_test (hoặc `SPLIT=…`) |
 | `scripts/baseline.sh` | Baseline k=0 và k=3 trên train (transcript gold) |
 | `scripts/train_sft_24gb.sh` | Từ dữ liệu thô tới LoRA: ASR train → dữ liệu SFT (gold + ASR) → train. `HOLDOUT=none` để train trên toàn bộ train |
