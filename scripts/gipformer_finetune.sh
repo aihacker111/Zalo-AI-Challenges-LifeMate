@@ -28,6 +28,7 @@ MAX_DURATION=${MAX_DURATION:-600}     # seconds of audio per batch; lower it on 
 EPOCH=${EPOCH:-$EPOCHS}               # epoch to export
 AVG=${AVG:-2}                         # average the model over the last AVG epochs (icefall model_avg)
 SPEED_PERTURB=${SPEED_PERTURB:-1}
+NUM_JOBS=${NUM_JOBS:-8}                # CPU processes for fbank extraction (stage 2)
 export ICEFALL_DIR=${ICEFALL_DIR:-$PWD/third_party/icefall}
 
 BASE=models/gipformer/base
@@ -80,7 +81,7 @@ if run 2; then
   echo "== 2/4 cuts + fbank: $MANIFEST -> $DATA"
   [[ -s "$MANIFEST/train.jsonl" ]] || { echo "missing $MANIFEST/train.jsonl (run lifemate asr-manifest)"; exit 1; }
   python recipes/gipformer/prepare_cuts.py --manifest-dir "$MANIFEST" --bpe-model "$BASE/bpe.model" \
-    --out-dir "$DATA" --speed-perturb "$SPEED_PERTURB"
+    --out-dir "$DATA" --speed-perturb "$SPEED_PERTURB" --num-jobs "$NUM_JOBS"
 fi
 
 if run 3; then
