@@ -1,5 +1,58 @@
 # Quy trình đầy đủ: từ dữ liệu tới bài nộp
 
+## Quy trình hiện tại (gipformer + LLM SFT trên toàn bộ dữ liệu)
+
+Kết quả trên 878 câu val cho thấy **gipformer1.5-68M (chưa fine-tune) tốt nhất**: WER 16,1%, so với 36,1% của Qwen3-ASR-0.6B gốc và 27,0% sau khi fine-tune. Vì vậy:
+- **ASR:** dùng gipformer, không fine-tune. Model chạy trên CPU và không tốn VRAM.
+- **LLM:** SFT trên toàn bộ 1.545 mẫu. Input gồm transcript gold (kèm augment đổi tên tool) và transcript gipformer, để model quen với lỗi ASR thật. Gipformer chưa từng nghe audio train, nên transcript của nó nhiễu như khi gặp đề thật.
+
+```bash
+# ── 0. Đồng bộ và chuẩn bị (máy GPU) ─────────────────────────────────────────
+cd /media/hung/HDD2/workplaces/tin/Zalo-AI-Challenges-LifeMate
+git pull
+conda activate lifemate
+pip install -e ".[gipformer]"
+pip show transformers | grep Version              # phải là 5.x
+pgrep -af "bin/vllm serve"                        # nếu có dòng nào: kill <pid>
+nvidia-smi                                        # GPU phải trống
+tmux new -s full                                  # Ctrl+B rồi D để thoát; tmux attach -t full để xem lại
+
+# ── 1. Train LLM trên toàn bộ dữ liệu (~6–7 giờ) ─────────────────────────────
+HOLDOUT=none MIX_ASR=1 ASR=gipformer NAME=sft-full bash scripts/train_sft_24gb.sh
+#   1/3 gipformer cho 5.036 câu train (CPU, ~40–50 phút) → outputs/asr_gipformer_train.jsonl
+#   2/3 dữ liệu SFT: gold (+1 bản đổi tên tool) + gipformer → outputs/sft_none_mix/train.jsonl (~4.600 mẫu)
+#   3/3 LoRA SFT 1 epoch → checkpoints/sft-full, log ở outputs/sft-full.log
+
+# ── 2. Bài nộp public ─────────────────────────────────────────────────────────
+LORA=checkpoints/sft-full bash scripts/predict_public.sh
+#   → outputs/public_test/submission_sft-full.jsonl (634 dòng), upload lên trang thi
+```
+
+Bản này đã học cả tập val, nên không đo được trên val. Điểm public là thước đo duy nhất.
+
+### Docker (trước 23:59 ngày 16/11)
+
+```bash
+python -m lifemate.train.merge_lora --base models/base/Qwen3.5-4B --adapter checkpoints/sft-full --out models/llm
+huggingface-cli download g-group-ai-lab/gipformer1.5-68M-rnnt --local-dir models/asr \
+  --include "encoder.onnx" "decoder.onnx" "joiner.onnx" "tokens.txt"
+mkdir -p assets/train && cp data/train/train.jsonl assets/train/
+docker build -f docker/Dockerfile -t lifemate:final .
+time docker run --rm --gpus all --network none \
+  -v $(realpath data)/public_test:/data -v $PWD/outputs/docker:/app/result lifemate:final
+```
+
+Trước khi nộp, kiểm tra:
+- `validate` báo `OK`.
+- Điểm public của `outputs/docker/submission.jsonl` khớp với bài nộp ở bước 2.
+- Trung bình dưới 30 giây mỗi mẫu.
+- Tổng tham số khoảng 4,2B (LLM) + 0,07B (gipformer), dưới trần 6B.
+
+Các phần bên dưới là quy trình chi tiết có tập val, dùng khi cần thử nghiệm (đổi cấu hình, so sánh model).
+
+---
+
+
 Hệ thống gồm hai model chạy nối tiếp. Mọi bài nộp đều đi qua cả hai:
 
 ```

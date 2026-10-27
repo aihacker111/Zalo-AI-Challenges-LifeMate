@@ -141,7 +141,7 @@ Với backend `openai`, `infer` kiểm tra server và tên model trước khi ch
 
 ## Quy trình đề xuất
 
-Hướng dẫn chi tiết từng lệnh, mốc thời gian và bảng nhật ký nằm trong [docs/training.md](docs/training.md).
+Hướng dẫn chi tiết từng lệnh, mốc thời gian và bảng nhật ký nằm trong [docs/training.md](docs/training.md). Quy trình đang dùng (gipformer + LLM SFT trên toàn bộ dữ liệu) nằm ở mục đầu tiên của file đó.
 
 1. **Baseline không train.** Đo điểm zero-shot và few-shot (k = 3) trên tập val leave-apps-out với transcript gold (mục 3 ở trên). Lỗi được phân loại thành `extra_read`, `missing_read`, `write_mismatch`, `ask_mismatch`, `oos_false_action`…
 2. **Đo ASR.** Chạy `transcribe` trên train rồi `asr-eval`; lưu ý riêng tỉ lệ sai số (tiền, giờ, số điện thoại).
@@ -235,7 +235,7 @@ Có 34 test, gồm: metric (gold = 100, rỗng = tỉ lệ OOS, thừa/thiếu m
 
 ## Ghi chú về dữ liệu
 
-- **ASR là nút thắt lớn nhất.** Qwen3-ASR-0.6B gốc có WER khoảng 37% trên audio train (giọng thật, nhiều vùng miền), và nhiều câu mất hẳn nội dung, ví dụ "chuyển mẹ ba triệu liền đi" thành "chỉ mẹ ban chiều lên đi". Vì vậy dữ liệu SFT mặc định chỉ dùng transcript gold (`MIX_ASR=0`), và cần fine-tune ASR trên audio train (xem [docs/training.md](docs/training.md), mục 2).
+- **ASR là nút thắt lớn nhất.** Trên 878 câu val (giọng thật, nhiều vùng miền), WER như sau: Qwen3-ASR-0.6B gốc 36,1%; sau fine-tune 27,0%; **gipformer1.5-68M chưa fine-tune 16,1%**. Gipformer là ASR mặc định. Vì nó chưa từng nghe audio train, transcript của nó dùng được làm input SFT (`MIX_ASR=1`).
 
 - `train_1696` có nhãn sai: gold gửi tin tới `chat_6142`, một chat không tool nào trả về. Guard chặn call này (đúng chính sách) nên mẫu này mất điểm trong kiểm tra oracle.
 - 11 app của public_test không có trong train, nên private test nhiều khả năng cũng có app mới. Số đo quan trọng nhất là điểm trên tập leave-apps-out (`build-sft --holdout apps`).
