@@ -8,10 +8,10 @@
 #   1. ASR transcripts of every user turn in train (base Qwen3-ASR, never a model fine-tuned on train audio)
 #   2. SFT data from gold transcripts and from ASR transcripts, mixed and shuffled
 #   3. LoRA SFT
-# Settings: HOLDOUT, NAME, EPOCHS, MIX_ASR, AUGMENT_GOLD, AUGMENT_ASR, FEWSHOT, MAX_LENGTH, ASR_MODEL, BASE_MODEL.
-# MIX_ASR=0 (default) trains on gold transcripts only: with the base Qwen3-ASR-0.6B the train WER is ~37% and many
-# transcripts lose the request ("chuyển mẹ ba triệu" -> "chỉ mẹ ban chiều"), which would teach the model to guess.
-# Set MIX_ASR=1 once the ASR is good enough.
+# Settings: HOLDOUT, NAME, EPOCHS, MIX_ASR, ASR, ASR_MODEL, AUGMENT_GOLD, AUGMENT_ASR, FEWSHOT, MAX_LENGTH, BASE_MODEL.
+# MIX_ASR=1 adds a copy of the data whose inputs are ASR transcripts (default engine: gipformer, ~16% WER on val and
+# never trained on this audio, so its errors are realistic). Do not use an ASR fine-tuned on the train audio here:
+# its train transcripts are cleaner than what it produces on unseen audio. MIX_ASR=0 (default) uses gold only.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
@@ -25,9 +25,9 @@ AUGMENT_ASR=${AUGMENT_ASR:-0}
 FEWSHOT=${FEWSHOT:-3}
 MAX_LENGTH=${MAX_LENGTH:-12288}
 BASE_MODEL=${BASE_MODEL:-models/base/Qwen3.5-4B}
-ASR_MODEL=${ASR_MODEL:-models/base/Qwen3-ASR-0.6B}
-if [[ ! -e "$ASR_MODEL" && "$ASR_MODEL" == models/* ]]; then ASR_MODEL=Qwen/Qwen3-ASR-0.6B; fi
-ASR_OUT=outputs/asr0_train.jsonl
+ASR=${ASR:-gipformer}
+ASR_MODEL=${ASR_MODEL:-}
+ASR_OUT=outputs/asr_${ASR}_train.jsonl
 if [[ "$MIX_ASR" == 1 ]]; then DATA_DIR=outputs/sft_${HOLDOUT}_mix; else DATA_DIR=outputs/sft_${HOLDOUT}_gold; fi
 mkdir -p outputs
 
@@ -37,11 +37,11 @@ if pgrep -u "$(id -u)" -f "bin/vllm serve" > /dev/null; then
 fi
 
 if [[ "$MIX_ASR" == 1 ]]; then
-  echo "== 1/3 ASR transcripts of train ($ASR_MODEL)"
+  echo "== 1/3 ASR transcripts of train ($ASR ${ASR_MODEL:-default model})"
   if [[ -s "$ASR_OUT" ]]; then
     echo "cached: $ASR_OUT"
   else
-    lifemate transcribe --split train --asr qwen --asr-model "$ASR_MODEL" --out "$ASR_OUT"
+    lifemate transcribe --split train --asr "$ASR" ${ASR_MODEL:+--asr-model "$ASR_MODEL"} --out "$ASR_OUT"
   fi
   lifemate asr-eval --split train --transcripts "$ASR_OUT"
 

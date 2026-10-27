@@ -1,11 +1,14 @@
 #!/usr/bin/env bash
 # End-to-end submission for a test split: ASR (cached) -> vLLM server -> agent -> schema validation.
 #
-#   bash scripts/predict_public.sh                                  # base model Qwen3.5-4B
+#   bash scripts/predict_public.sh                                  # gipformer ASR + base Qwen3.5-4B
 #   LORA=checkpoints/sft-v1 bash scripts/predict_public.sh          # base + LoRA adapter
 #   MODEL=models/sft-v1 bash scripts/predict_public.sh              # merged checkpoint
 #
-# Settings (environment variables): SPLIT, MODEL, LORA, ASR_MODEL, PORT, MEM, FEWSHOT, OUT_DIR, TRANSCRIPTS.
+#   ASR=qwen ASR_MODEL=checkpoints/asr-ft/checkpoint-390 bash scripts/predict_public.sh
+#
+# Settings (environment variables): SPLIT, MODEL, LORA, ASR (gipformer|chunkformer|qwen), ASR_MODEL, PORT, MEM,
+# FEWSHOT, OUT_DIR, TRANSCRIPTS.
 # Output: outputs/<split>/submission_<tag>.jsonl, ready to upload.
 set -euo pipefail
 cd "$(dirname "$0")/.."
@@ -13,7 +16,8 @@ cd "$(dirname "$0")/.."
 SPLIT=${SPLIT:-public_test}
 MODEL=${MODEL:-models/base/Qwen3.5-4B}
 LORA=${LORA:-}
-ASR_MODEL=${ASR_MODEL:-models/base/Qwen3-ASR-0.6B}
+ASR=${ASR:-gipformer}
+if [[ "$ASR" == qwen ]]; then ASR_MODEL=${ASR_MODEL:-models/base/Qwen3-ASR-0.6B}; else ASR_MODEL=${ASR_MODEL:-}; fi
 PORT=${PORT:-8011}
 MEM=${MEM:-0.85}
 FEWSHOT=${FEWSHOT:-3}
@@ -21,19 +25,19 @@ OUT_DIR=${OUT_DIR:-outputs/$SPLIT}
 TAG=$(basename "${LORA:-$MODEL}")
 mkdir -p "$OUT_DIR"
 
-if [[ ! -e "$ASR_MODEL" && "$ASR_MODEL" == models/* ]]; then
+if [[ "$ASR" == qwen && ! -e "$ASR_MODEL" && "$ASR_MODEL" == models/* ]]; then
   echo "$ASR_MODEL not found locally, using Qwen/Qwen3-ASR-0.6B from the Hub"
   ASR_MODEL=Qwen/Qwen3-ASR-0.6B
 fi
-ASR_TAG=$(echo "$ASR_MODEL" | sed 's#^models/base/##; s#^checkpoints/##; s#[/:]#_#g')
+ASR_TAG=$(echo "${ASR}_${ASR_MODEL:-default}" | sed 's#models/base/##; s#checkpoints/##; s#[/:]#_#g')
 TRANSCRIPTS=${TRANSCRIPTS:-$OUT_DIR/asr_${ASR_TAG}.jsonl}
 SUB="$OUT_DIR/submission_${TAG}.jsonl"
 
-echo "== 1/3 ASR ($ASR_MODEL)"
+echo "== 1/3 ASR ($ASR ${ASR_MODEL:-default model})"
 if [[ -s "$TRANSCRIPTS" ]]; then
   echo "using cached transcripts: $TRANSCRIPTS"
 else
-  lifemate transcribe --split "$SPLIT" --asr qwen --asr-model "$ASR_MODEL" --out "$TRANSCRIPTS"
+  lifemate transcribe --split "$SPLIT" --asr "$ASR" ${ASR_MODEL:+--asr-model "$ASR_MODEL"} --out "$TRANSCRIPTS"
 fi
 
 echo "== 2/3 vLLM ($MODEL${LORA:+ + LoRA $LORA})"

@@ -6,7 +6,7 @@ OUT=${OUT:-/app/result}
 mkdir -p "$OUT"
 
 # 1) ASR on every user turn, then the ASR model is released before the LLM loads.
-lifemate transcribe --data "$DATA" --asr qwen --asr-model /models/asr --out "$OUT/transcripts.jsonl"
+lifemate transcribe --data "$DATA" --asr "${ASR:-gipformer}" --asr-model /models/asr --out "$OUT/transcripts.jsonl"
 
 # 2) Agent with the merged LLM, greedy decoding, one ToolEnv session per sample.
 lifemate infer --data "$DATA" --backend vllm --model /models/llm \
