@@ -143,13 +143,54 @@ def load_model(cfg: SFTConfig) -> Any:
     import torch
     import transformers
 
-    kwargs = {"torch_dtype": torch.bfloat16}
+    import inspect
+
+    dtype_key = "dtype" if "dtype" in inspect.signature(transformers.PreTrainedModel.from_pretrained).parameters else "torch_dtype"
+    kwargs = {dtype_key: torch.bfloat16}
     if cfg.attn_implementation:
         kwargs["attn_implementation"] = cfg.attn_implementation
     try:
         return transformers.AutoModelForCausalLM.from_pretrained(cfg.model, **kwargs)
     except (ValueError, KeyError):  # multimodal checkpoints (e.g. Qwen3.5) register another auto class
         return transformers.AutoModelForImageTextToText.from_pretrained(cfg.model, **kwargs)
+
+
+def training_arguments(transformers: Any, cfg: SFTConfig, has_eval: bool, bf16: bool) -> Any:
+    """TrainingArguments that work across transformers 4.x and 5.x (renamed/removed options are mapped or dropped)."""
+    import inspect
+
+    accepted = set(inspect.signature(transformers.TrainingArguments.__init__).parameters)
+    kwargs: dict[str, Any] = {
+        "output_dir": cfg.output_dir,
+        "per_device_train_batch_size": cfg.per_device_train_batch_size,
+        "per_device_eval_batch_size": 1,
+        "gradient_accumulation_steps": cfg.gradient_accumulation_steps,
+        "learning_rate": cfg.learning_rate,
+        "num_train_epochs": cfg.num_train_epochs,
+        "lr_scheduler_type": cfg.lr_scheduler_type,
+        "logging_steps": cfg.logging_steps,
+        "eval_strategy": "steps" if has_eval else "no",
+        "eval_steps": cfg.eval_steps,
+        "save_steps": cfg.save_steps,
+        "save_total_limit": 3,
+        "bf16": bf16,
+        "gradient_checkpointing": False,  # enabled on the model
+        "group_by_length": True,
+        "report_to": [],
+        "seed": cfg.seed,
+        "remove_unused_columns": False,
+        **cfg.extra_trainer_args,
+    }
+    if "warmup_ratio" in accepted:
+        kwargs["warmup_ratio"] = cfg.warmup_ratio
+    else:  # transformers 5: warmup_steps accepts a fraction of the total steps
+        kwargs.setdefault("warmup_steps", cfg.warmup_ratio)
+    if "eval_strategy" not in accepted and "evaluation_strategy" in accepted:
+        kwargs["evaluation_strategy"] = kwargs.pop("eval_strategy")
+    dropped = sorted(k for k in kwargs if k not in accepted)
+    if dropped:
+        print(f"TrainingArguments: ignoring options this transformers version does not have: {dropped}")
+    return transformers.TrainingArguments(**{k: v for k, v in kwargs.items() if k in accepted})
 
 
 def main(argv: list[str] | None = None) -> None:
@@ -180,28 +221,7 @@ def main(argv: list[str] | None = None) -> None:
 
     train_ds = JsonlChatDataset(cfg.train_file, tokenizer, cfg)
     eval_ds = JsonlChatDataset(cfg.eval_file, tokenizer, cfg) if cfg.eval_file and Path(cfg.eval_file).exists() else None
-    targs = transformers.TrainingArguments(
-        output_dir=cfg.output_dir,
-        per_device_train_batch_size=cfg.per_device_train_batch_size,
-        per_device_eval_batch_size=1,
-        gradient_accumulation_steps=cfg.gradient_accumulation_steps,
-        learning_rate=cfg.learning_rate,
-        num_train_epochs=cfg.num_train_epochs,
-        warmup_ratio=cfg.warmup_ratio,
-        lr_scheduler_type=cfg.lr_scheduler_type,
-        logging_steps=cfg.logging_steps,
-        eval_strategy="steps" if eval_ds else "no",
-        eval_steps=cfg.eval_steps,
-        save_steps=cfg.save_steps,
-        save_total_limit=3,
-        bf16=torch.cuda.is_available(),
-        gradient_checkpointing=False,  # enabled on the model above
-        group_by_length=True,
-        report_to=[],
-        seed=cfg.seed,
-        remove_unused_columns=False,
-        **cfg.extra_trainer_args,
-    )
+    targs = training_arguments(transformers, cfg, has_eval=eval_ds is not None, bf16=torch.cuda.is_available())
     trainer = transformers.Trainer(
         model=model,
         args=targs,
