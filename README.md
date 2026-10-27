@@ -115,6 +115,7 @@ lifemate validate --split public_test --submission outputs/submission.jsonl
 | `transcribe` | ASR mọi lượt user (cả history), lưu JSON Lines | `--asr qwen\|oracle`, `--asr-model` |
 | `infer` | Chạy agent, ghi submission | `--backend vllm\|openai\|oracle`, `--base-url`, `--fewshot-k`, `--ids-file`, `--exclude-ids`, `--limit`, `--trace`, `--resume`, `--no-constrained`, `--config` |
 | `score` | Chấm trên split có nhãn, kèm phân loại lỗi | `--ids-file`, `--only-submitted`, `--report` |
+| `inspect` | Đọc file `--report` của `score`: call và tham số lệch nhiều nhất, kèm ví dụ | `--show`, `--label` |
 | `validate` | Kiểm tra schema file nộp bằng `zaic_tools` của split | |
 | `build-sft` | Dựng dữ liệu SFT và file `val_ids.txt` | `--holdout apps\|fold\|none`, `--augment`, `--fewshot-k`, `--transcripts` |
 | `asr-eval` | WER, WER bỏ dấu, tỉ lệ sai số so với gold | `--ids-file` |

@@ -188,6 +188,19 @@ def cmd_validate(args) -> None:
     print("OK" if not problems and not missing else f"{problems} problems, {len(missing)} missing")
 
 
+def cmd_inspect(args) -> None:
+    from lifemate.eval.inspect import load_report, show_samples, summarize_report
+
+    split = _split(args)
+    kinds = {n: t.get("kind", "write") for n, t in split.tools.items()}
+    rows = load_report(args.report)
+    texts = {s.id: s.audio_text or "" for s in split}
+    print(summarize_report(rows, kinds))
+    if args.show:
+        print()
+        print(show_samples(rows, kinds, texts, args.label, args.show))
+
+
 def cmd_build_sft(args) -> None:
     from lifemate.agent.fewshot import Retriever
     from lifemate.config import PromptConfig
@@ -304,6 +317,13 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--only-submitted", action="store_true", help="score only the ids present in the submission")
     s.add_argument("--ids-file", default=None, help="score only the ids listed in this file")
     s.set_defaults(func=cmd_score)
+
+    s = sub.add_parser("inspect", help="most frequent wrong calls/arguments in a score report, with examples")
+    _add_data(s)
+    s.add_argument("--report", required=True, help="output of `lifemate score --report`")
+    s.add_argument("--show", type=int, default=10, help="number of failing samples to print")
+    s.add_argument("--label", default=None, help="only samples with this error label, e.g. write_mismatch")
+    s.set_defaults(func=cmd_inspect)
 
     s = sub.add_parser("validate", help="schema-check a submission with the split's zaic_tools")
     _add_data(s, "public_test")
