@@ -98,14 +98,15 @@ Khi chấm trên val, luôn dùng `--exclude-ids`. Thiếu nó, few-shot sẽ l�
 
 ### 4. Tạo bài nộp public_test
 
+Một lệnh làm cả bốn việc: chạy ASR mọi lượt user (kết quả được cache lại), khởi động vLLM, chạy agent, kiểm tra định dạng file. Trước khi chạy, tắt các server vLLM khác (`kill $VLLM_PID`) để ASR và vLLM có đủ VRAM.
+
 ```bash
-kill $VLLM_PID    # nhường GPU cho ASR
-lifemate transcribe --split public_test --asr qwen --asr-model models/base/Qwen3-ASR-0.6B --out outputs/asr_public.jsonl
-source scripts/serve.sh models/base/Qwen3.5-4B base 8011 0.85
-lifemate infer --split public_test --backend openai --model base --base-url $BASE_URL \
-  --transcripts outputs/asr_public.jsonl --fewshot-k 3 --out outputs/submission.jsonl --trace outputs/trace.jsonl
-lifemate validate --split public_test --submission outputs/submission.jsonl
+bash scripts/predict_public.sh                                  # model gốc Qwen3.5-4B
+LORA=checkpoints/sft-v1 bash scripts/predict_public.sh          # model gốc + LoRA adapter
+MODEL=models/sft-v1 bash scripts/predict_public.sh              # checkpoint đã gộp LoRA
 ```
+
+File nộp nằm ở `outputs/public_test/submission_<tên model>.jsonl`. Các tuỳ chọn khác đặt qua biến môi trường: `PORT`, `MEM`, `FEWSHOT`, `ASR_MODEL`, `SPLIT`.
 
 ### Các lệnh
 
@@ -133,6 +134,7 @@ Với backend `openai`, `infer` kiểm tra server và tên model trước khi ch
 | Script | Việc |
 |---|---|
 | `scripts/serve.sh` | Khởi động vLLM, chờ sẵn sàng, export `BASE_URL`/`VLLM_PID` |
+| `scripts/predict_public.sh` | ASR → vLLM → agent → validate, ra file nộp cho public_test (hoặc `SPLIT=…`) |
 | `scripts/baseline.sh` | Baseline k=0 và k=3 trên train (transcript gold) |
 | `scripts/train_sft_24gb.sh` | Dựng dữ liệu SFT và train LoRA trên 24 GB |
 
