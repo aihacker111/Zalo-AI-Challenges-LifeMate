@@ -119,6 +119,8 @@ Nộp `outputs/sub_base.jsonl`, rồi so điểm leaderboard với điểm val �
 ```bash
 lifemate asr-manifest --data $DATA --out-dir outputs/asr --val-ids $VAL   # cùng tập val với LLM
 git clone https://github.com/QwenLM/Qwen3-ASR.git third_party/Qwen3-ASR
+# qwen-asr (dùng cho script fine-tune) chỉ chạy với transformers 4.x: dùng một môi trường riêng
+conda create -n asrft python=3.12 -y && conda activate asrft && pip install -U qwen-asr datasets
 python third_party/Qwen3-ASR/finetuning/qwen3_asr_sft.py \
   --model_path models/base/Qwen3-ASR-0.6B \
   --train_file outputs/asr/train.jsonl --eval_file outputs/asr/val.jsonl \

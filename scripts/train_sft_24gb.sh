@@ -8,13 +8,17 @@
 #   1. ASR transcripts of every user turn in train (base Qwen3-ASR, never a model fine-tuned on train audio)
 #   2. SFT data from gold transcripts and from ASR transcripts, mixed and shuffled
 #   3. LoRA SFT
-# Settings: HOLDOUT, NAME, EPOCHS, AUGMENT_GOLD, AUGMENT_ASR, FEWSHOT, MAX_LENGTH, ASR_MODEL, BASE_MODEL.
+# Settings: HOLDOUT, NAME, EPOCHS, MIX_ASR, AUGMENT_GOLD, AUGMENT_ASR, FEWSHOT, MAX_LENGTH, ASR_MODEL, BASE_MODEL.
+# MIX_ASR=0 (default) trains on gold transcripts only: with the base Qwen3-ASR-0.6B the train WER is ~37% and many
+# transcripts lose the request ("chuyển mẹ ba triệu" -> "chỉ mẹ ban chiều"), which would teach the model to guess.
+# Set MIX_ASR=1 once the ASR is good enough.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
 HOLDOUT=${HOLDOUT:-apps}
 NAME=${NAME:-$([[ "$HOLDOUT" == none ]] && echo sft-full || echo sft-v1)}
 EPOCHS=${EPOCHS:-1}
+MIX_ASR=${MIX_ASR:-0}
 AUGMENT_GOLD=${AUGMENT_GOLD:-1}
 AUGMENT_ASR=${AUGMENT_ASR:-0}
 FEWSHOT=${FEWSHOT:-3}
@@ -23,7 +27,7 @@ BASE_MODEL=${BASE_MODEL:-models/base/Qwen3.5-4B}
 ASR_MODEL=${ASR_MODEL:-models/base/Qwen3-ASR-0.6B}
 [[ -e "$ASR_MODEL" || "$ASR_MODEL" != models/* ]] || ASR_MODEL=Qwen/Qwen3-ASR-0.6B
 ASR_OUT=outputs/asr0_train.jsonl
-DATA_DIR=outputs/sft_${HOLDOUT}
+DATA_DIR=outputs/sft_${HOLDOUT}$([[ "$MIX_ASR" == 1 ]] && echo _mix)
 mkdir -p outputs
 
 if ss -ltn 2>/dev/null | grep -qE ':(8011|8000) ' && pgrep -u "$USER" -f "vllm serve" > /dev/null; then
@@ -31,13 +35,18 @@ if ss -ltn 2>/dev/null | grep -qE ':(8011|8000) ' && pgrep -u "$USER" -f "vllm s
   exit 1
 fi
 
-echo "== 1/3 ASR transcripts of train ($ASR_MODEL)"
-if [[ -s "$ASR_OUT" ]]; then
-  echo "cached: $ASR_OUT"
+if [[ "$MIX_ASR" == 1 ]]; then
+  echo "== 1/3 ASR transcripts of train ($ASR_MODEL)"
+  if [[ -s "$ASR_OUT" ]]; then
+    echo "cached: $ASR_OUT"
+  else
+    lifemate transcribe --split train --asr qwen --asr-model "$ASR_MODEL" --out "$ASR_OUT"
+  fi
+  lifemate asr-eval --split train --transcripts "$ASR_OUT"
+
 else
-  lifemate transcribe --split train --asr qwen --asr-model "$ASR_MODEL" --out "$ASR_OUT"
+  echo "== 1/3 ASR transcripts: skipped (MIX_ASR=0, gold transcripts only)"
 fi
-lifemate asr-eval --split train --transcripts "$ASR_OUT"
 
 echo "== 2/3 SFT data (holdout=$HOLDOUT) -> $DATA_DIR"
 if [[ -s "$DATA_DIR/train.jsonl" ]]; then
@@ -45,12 +54,16 @@ if [[ -s "$DATA_DIR/train.jsonl" ]]; then
 else
   lifemate build-sft --split train --asr oracle --holdout "$HOLDOUT" --n-apps 10 \
     --augment "$AUGMENT_GOLD" --fewshot-k "$FEWSHOT" --out-dir "$DATA_DIR/gold"
-  lifemate build-sft --split train --transcripts "$ASR_OUT" --holdout "$HOLDOUT" --n-apps 10 \
-    --augment "$AUGMENT_ASR" --fewshot-k "$FEWSHOT" --out-dir "$DATA_DIR/asr"
-  cat "$DATA_DIR/gold/train.jsonl" "$DATA_DIR/asr/train.jsonl" | shuf --random-source=<(yes) > "$DATA_DIR/train.jsonl"
-  if [[ -s "$DATA_DIR/asr/val_ids.txt" ]]; then
-    cp "$DATA_DIR/asr/val_ids.txt" "$DATA_DIR/val_ids.txt"
-    cp "$DATA_DIR/asr/val.jsonl" "$DATA_DIR/val.jsonl"
+  parts=("$DATA_DIR/gold/train.jsonl")
+  if [[ "$MIX_ASR" == 1 ]]; then
+    lifemate build-sft --split train --transcripts "$ASR_OUT" --holdout "$HOLDOUT" --n-apps 10 \
+      --augment "$AUGMENT_ASR" --fewshot-k "$FEWSHOT" --out-dir "$DATA_DIR/asr"
+    parts+=("$DATA_DIR/asr/train.jsonl")
+  fi
+  cat "${parts[@]}" | shuf --random-source=<(yes) > "$DATA_DIR/train.jsonl"
+  if [[ -s "$DATA_DIR/gold/val_ids.txt" ]]; then
+    cp "$DATA_DIR/gold/val_ids.txt" "$DATA_DIR/val_ids.txt"
+    cp "$DATA_DIR/gold/val.jsonl" "$DATA_DIR/val.jsonl"
   fi
 fi
 echo "$(wc -l < "$DATA_DIR/train.jsonl") training examples"

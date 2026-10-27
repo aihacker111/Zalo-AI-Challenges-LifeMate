@@ -234,6 +234,8 @@ Có 34 test, gồm: metric (gold = 100, rỗng = tỉ lệ OOS, thừa/thiếu m
 
 ## Ghi chú về dữ liệu
 
+- **ASR là nút thắt lớn nhất.** Qwen3-ASR-0.6B gốc có WER khoảng 37% trên audio train (giọng thật, nhiều vùng miền), và nhiều câu mất hẳn nội dung, ví dụ "chuyển mẹ ba triệu liền đi" thành "chỉ mẹ ban chiều lên đi". Vì vậy dữ liệu SFT mặc định chỉ dùng transcript gold (`MIX_ASR=0`), và cần fine-tune ASR trên audio train (xem [docs/training.md](docs/training.md), mục 2).
+
 - `train_1696` có nhãn sai: gold gửi tin tới `chat_6142`, một chat không tool nào trả về. Guard chặn call này (đúng chính sách) nên mẫu này mất điểm trong kiểm tra oracle.
 - 11 app của public_test không có trong train, nên private test nhiều khả năng cũng có app mới. Số đo quan trọng nhất là điểm trên tập leave-apps-out (`build-sft --holdout apps`).
 
