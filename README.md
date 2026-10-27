@@ -136,7 +136,7 @@ Với backend `openai`, `infer` kiểm tra server và tên model trước khi ch
 | `scripts/serve.sh` | Khởi động vLLM, chờ sẵn sàng, export `BASE_URL`/`VLLM_PID` |
 | `scripts/predict_public.sh` | ASR → vLLM → agent → validate, ra file nộp cho public_test (hoặc `SPLIT=…`) |
 | `scripts/baseline.sh` | Baseline k=0 và k=3 trên train (transcript gold) |
-| `scripts/train_sft_24gb.sh` | Dựng dữ liệu SFT và train LoRA trên 24 GB |
+| `scripts/train_sft_24gb.sh` | Từ dữ liệu thô tới LoRA: ASR train → dữ liệu SFT (gold + ASR) → train. `HOLDOUT=none` để train trên toàn bộ train |
 
 ## Quy trình đề xuất
 
@@ -144,7 +144,7 @@ Hướng dẫn chi tiết từng lệnh, mốc thời gian và bảng nhật ký
 
 1. **Baseline không train.** Đo điểm zero-shot và few-shot (k = 3) trên tập val leave-apps-out với transcript gold (mục 3 ở trên). Lỗi được phân loại thành `extra_read`, `missing_read`, `write_mismatch`, `ask_mismatch`, `oos_false_action`…
 2. **Đo ASR.** Chạy `transcribe` trên train rồi `asr-eval`; lưu ý riêng tỉ lệ sai số (tiền, giờ, số điện thoại).
-3. **LoRA SFT** nếu baseline còn cách xa mục tiêu: `scripts/train_sft_24gb.sh`. Dữ liệu dựng với input là **transcript ASR** để model quen với lỗi nhận dạng.
+3. **LoRA SFT** nếu baseline còn cách xa mục tiêu: `bash scripts/train_sft_24gb.sh` (giữ tập val, ra `checkpoints/sft-v1`), sau đó `HOLDOUT=none bash scripts/train_sft_24gb.sh` (toàn bộ train, ra `checkpoints/sft-full`). Dữ liệu trộn input transcript gold và transcript ASR, để model quen với lỗi nhận dạng.
 4. **RFT.** `python -m lifemate.train.rft` lấy mẫu vài quỹ đạo cho mỗi task, chỉ giữ quỹ đạo đạt điểm tuyệt đối, rồi SFT thêm một vòng.
 5. **Đóng gói.** `python -m lifemate.train.merge_lora` gộp adapter vào model gốc, sau đó build Docker.
 
