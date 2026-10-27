@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import json
 import logging
+import os
 import sys
 from collections import Counter
 from pathlib import Path
@@ -54,8 +55,15 @@ def _ids(args, split):
     return ids
 
 
+DEFAULT_DATA = os.environ.get("LIFEMATE_DATA", "data")
+
+
 def _add_data(p, split_default="train"):
-    p.add_argument("--data", required=True, help="split folder, or a folder containing <split>/")
+    p.add_argument(
+        "--data",
+        default=DEFAULT_DATA,
+        help="split folder, or a folder containing <split>/ (default: $LIFEMATE_DATA or ./data)",
+    )
     p.add_argument("--split", default=split_default)
 
 

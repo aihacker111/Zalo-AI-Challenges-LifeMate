@@ -5,8 +5,9 @@ Mục tiêu: có Docker nộp trước **23:59 ngày 16/11**. Mọi quyết đ�
 Quy ước dùng trong file này:
 
 ```bash
-cd ~/Downloads/lifemate
-DATA=../train+public_test
+cd ~/Desktop/Zalo-AI-Challenges-LifeMate
+ln -s ~/Downloads/train+public_test data   # một lần; "data" đã nằm trong .gitignore
+DATA=data
 VAL=outputs/sft/val_ids.txt          # tạo ở bước 1.1, dùng chung cho ASR và LLM
 ```
 
@@ -216,7 +217,7 @@ python -m lifemate.train.sft_lora --config configs/sft_lora_24gb.yaml train_file
 cp -r checkpoints/asr/checkpoint-XXX models/asr        # hoặc models/base/Qwen3-ASR-0.6B nếu không fine-tune ASR
 mkdir -p assets/train && cp $DATA/train/train.jsonl assets/train/
 docker build -f docker/Dockerfile -t lifemate:final .
-time docker run --rm --gpus all --network none -v $PWD/$DATA/public_test:/data -v $PWD/outputs/docker:/app/result lifemate:final
+time docker run --rm --gpus all --network none -v $(realpath $DATA)/public_test:/data -v $PWD/outputs/docker:/app/result lifemate:final
 ```
 
 Kiểm tra trước khi nộp:

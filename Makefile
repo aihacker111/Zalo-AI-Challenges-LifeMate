@@ -1,5 +1,6 @@
-# Common developer tasks. DATA points at the folder holding train/ and public_test/.
-DATA ?= ../train+public_test
+# Common developer tasks. DATA points at the folder holding train/ and public_test/
+# (create the link once: ln -s /path/to/train+public_test data).
+DATA ?= data
 PY ?= python3
 
 .PHONY: install dev test lint stats oracle score-oracle

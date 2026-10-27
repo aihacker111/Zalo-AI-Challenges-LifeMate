@@ -1,7 +1,7 @@
 """Shared test helpers. Data-dependent tests are skipped when the competition data is not available.
 
-Point ``LIFEMATE_DATA`` at the folder that holds ``train/`` and ``public_test/`` (default: ``../train+public_test``
-next to the repository).
+Point ``LIFEMATE_DATA`` at the folder that holds ``train/`` and ``public_test/``; by default the tests look for a
+``data`` link inside the repository, then for ``../train+public_test`` next to it.
 """
 
 from __future__ import annotations
@@ -19,7 +19,14 @@ warnings.filterwarnings("ignore", category=ResourceWarning)
 REPO = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO / "src"))
 
-DATA = Path(os.environ.get("LIFEMATE_DATA", REPO.parent / "train+public_test"))
+def _default_data() -> Path:
+    for candidate in (REPO / "data", REPO.parent / "train+public_test"):
+        if (candidate / "train" / "train.jsonl").exists():
+            return candidate
+    return REPO / "data"
+
+
+DATA = Path(os.environ["LIFEMATE_DATA"]) if os.environ.get("LIFEMATE_DATA") else _default_data()
 HAS_DATA = (DATA / "train" / "train.jsonl").exists()
 requires_data = unittest.skipUnless(HAS_DATA, f"competition data not found at {DATA} (set LIFEMATE_DATA)")
 

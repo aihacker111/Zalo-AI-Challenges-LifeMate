@@ -1,1 +1,27 @@
-__pycache__
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+build/
+dist/
+.pytest_cache/
+.ruff_cache/
+
+# Competition data and artefacts (never commit: redistribution is forbidden)
+/data
+train+public_test/
+private_test/
+*.wav
+models/
+checkpoints/
+outputs/
+runs/
+result/
+*.jsonl
+!tests/fixtures/*.jsonl
+
+# OS / editors
+.DS_Store
+.vscode/
+.idea/

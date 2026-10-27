@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # Zero-shot / few-shot baseline on train (gold transcripts) with a local vLLM server.
-#   bash scripts/baseline.sh ../train+public_test Qwen/Qwen3.5-4B
+#   bash scripts/baseline.sh data Qwen/Qwen3.5-4B
 set -euo pipefail
-DATA=${1:-../train+public_test}
+DATA=${1:-data}
 MODEL=${2:-Qwen/Qwen3.5-4B}
 PORT=${PORT:-8000}
 mkdir -p outputs

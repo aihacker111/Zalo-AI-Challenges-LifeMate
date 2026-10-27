@@ -25,7 +25,7 @@ catalog các app đã cài ─────────────────�
 ## Cài đặt
 
 ```bash
-git clone <repo> lifemate && cd lifemate
+git clone https://github.com/aihacker111/Zalo-AI-Challenges-LifeMate.git && cd Zalo-AI-Challenges-LifeMate
 python -m pip install -e ".[dev,yaml]"      # core + test/lint
 python -m pip install -e ".[vllm,asr]"      # inference trên GPU
 python -m pip install -e ".[train]"         # huấn luyện LoRA
@@ -35,22 +35,24 @@ Python ≥ 3.10. Nếu không cài package, có thể chạy trực tiếp: `PYT
 
 ### Dữ liệu
 
-Đặt gói dữ liệu của BTC cạnh repo; **không commit dữ liệu**, vì quy định cấm phát tán:
+Gói dữ liệu của BTC ở đâu cũng được. Tạo một symlink `data` trong repo trỏ tới nó (đã nằm trong `.gitignore`), hoặc đặt biến `LIFEMATE_DATA`. **Không commit dữ liệu**, vì quy định cấm phát tán.
 
-```
-Downloads/
-├── lifemate/              # repo này
-└── train+public_test/
-    ├── train/             # train.jsonl, train_tools_catalog.json, train_environment/, audio/, zaic_tools/
-    └── public_test/
+```bash
+ln -s ~/Downloads/train+public_test data      # hoặc: export LIFEMATE_DATA=~/Downloads/train+public_test
 ```
 
-`--data` nhận thư mục chứa các split (kèm `--split train`) hoặc chính thư mục của một split, ví dụ `/data` trong Docker.
+```
+train+public_test/
+├── train/             # train.jsonl, train_tools_catalog.json, train_environment/, audio/, zaic_tools/
+└── public_test/
+```
+
+`--data` mặc định là `$LIFEMATE_DATA` hoặc `./data`. Tham số này nhận thư mục chứa các split (kèm `--split train`) hoặc chính thư mục của một split, ví dụ `/data` trong Docker.
 
 ## Sử dụng nhanh
 
 ```bash
-DATA=../train+public_test
+DATA=data
 
 lifemate stats --data $DATA --split train
 
@@ -104,9 +106,9 @@ Qwen3.5 dùng kiến trúc lai Gated DeltaNet; cài thêm `flash-linear-attentio
 ```bash
 python -m lifemate.train.merge_lora --base Qwen/Qwen3.5-4B --adapter checkpoints/sft-lora --out models/llm
 cp -r <asr-checkpoint> models/asr
-mkdir -p assets/train && cp ../train+public_test/train/train.jsonl assets/train/
+mkdir -p assets/train && cp data/train/train.jsonl assets/train/
 docker build -f docker/Dockerfile -t lifemate:final .
-docker run --gpus all --network none -v $PWD/../train+public_test/public_test:/data lifemate:final
+docker run --gpus all --network none -v $(realpath data)/public_test:/data lifemate:final
 ```
 
 Container đọc `/data` và ghi `result/submission.jsonl`. ASR chạy trước cho mọi lượt rồi giải phóng GPU, sau đó LLM mới được nạp.
@@ -146,7 +148,7 @@ tests/                 # unittest; các test cần dữ liệu tự bỏ qua khi
 ## Test
 
 ```bash
-make test DATA=../train+public_test      # hoặc: LIFEMATE_DATA=... python -m unittest discover -s tests -t .
+make test                                 # hoặc: LIFEMATE_DATA=... python -m unittest discover -s tests -t .
 ```
 
 Có 34 test, gồm: metric (gold = 100, rỗng = tỉ lệ OOS, thừa/thiếu một lệnh đọc), guard, parser, agent oracle trên toàn bộ train, tính trùng khớp giữa SFT và inference, và augment.

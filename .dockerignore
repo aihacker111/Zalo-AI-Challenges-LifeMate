@@ -1,0 +1,5 @@
+.git
+outputs
+checkpoints
+runs
+**/__pycache__

@@ -4,13 +4,14 @@ A cheap stand-in for RL on a single GPU: it needs only inference (a ``vllm serve
 offline scorer. Kept trajectories are clean (no guard rejection, no parse error) and are written in the SFT format.
 
     vllm serve <model-or-merged-checkpoint> --max-model-len 16384 --enable-prefix-caching
-    python -m lifemate.train.rft --data ../train+public_test --base-url http://localhost:8000/v1 --model <name> --samples 4
+    python -m lifemate.train.rft --data data --base-url http://localhost:8000/v1 --model <name> --samples 4
 """
 
 from __future__ import annotations
 
 import argparse
 import json
+import os
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
@@ -25,7 +26,7 @@ from lifemate.eval.scorer import Scorer
 
 def main(argv: list[str] | None = None) -> None:
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    ap.add_argument("--data", required=True)
+    ap.add_argument("--data", default=os.environ.get("LIFEMATE_DATA", "data"))
     ap.add_argument("--split", default="train")
     ap.add_argument("--base-url", required=True)
     ap.add_argument("--model", required=True)

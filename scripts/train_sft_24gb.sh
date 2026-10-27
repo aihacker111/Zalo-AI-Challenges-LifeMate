@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # Build SFT data (leave-10-apps-out validation, 2 renamed copies per sample) and train LoRA on one 24 GB GPU.
-#   bash scripts/train_sft_24gb.sh ../train+public_test [outputs/transcripts_train.jsonl]
+#   bash scripts/train_sft_24gb.sh data [outputs/transcripts_train.jsonl]
 set -euo pipefail
-DATA=${1:-../train+public_test}
+DATA=${1:-data}
 TRANSCRIPTS=${2:-}
 
 ASR_ARGS=(--asr oracle)
