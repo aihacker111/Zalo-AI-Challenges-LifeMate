@@ -4,18 +4,16 @@
 set -euo pipefail
 DATA=${1:-data}
 MODEL=${2:-Qwen/Qwen3.5-4B}
-PORT=${PORT:-8000}
+PORT=${PORT:-8011}
+MEM=${MEM:-0.85}
 mkdir -p outputs
 
-vllm serve "$MODEL" --port "$PORT" --max-model-len 16384 --enable-prefix-caching \
-  --gpu-memory-utilization 0.85 --seed 0 > outputs/vllm.log 2>&1 &
-SERVER=$!
-trap 'kill $SERVER' EXIT
-until curl -sf "http://localhost:$PORT/health" > /dev/null; do sleep 5; done
+source "$(dirname "$0")/serve.sh" "$MODEL" base "$PORT" "$MEM"
+trap 'kill $VLLM_PID' EXIT
 
 for K in 0 3; do
-  lifemate infer --data "$DATA" --split train --backend openai --model "$MODEL" \
-    --base-url "http://localhost:$PORT/v1" --asr oracle --fewshot-k "$K" \
+  lifemate infer --data "$DATA" --split train --backend openai --model base \
+    --base-url "$BASE_URL" --asr oracle --fewshot-k "$K" \
     --out "outputs/baseline_k$K.jsonl" --trace "outputs/baseline_k$K.trace.jsonl"
   lifemate score --data "$DATA" --split train --submission "outputs/baseline_k$K.jsonl" \
     --report "outputs/baseline_k$K.scores.jsonl"

@@ -32,6 +32,8 @@ conda install -c nvidia cuda-nvcc=<torch.version.cuda>   # ví dụ 12.8
 pip install causal-conv1d --no-build-isolation
 ```
 
+Máy dùng chung có thể có dịch vụ khác giữ cổng 8000. Mọi lệnh bên dưới dùng `scripts/serve.sh` với cổng 8011, và truyền `--base-url $BASE_URL` cho `infer`. **Không dùng `pkill -f` với chuỗi ngắn**; tắt server của mình bằng `kill $VLLM_PID`.
+
 Kiểm tra trần tham số ngay từ đầu:
 
 ```bash
@@ -60,11 +62,9 @@ lifemate build-sft --data $DATA --asr oracle --holdout apps --n-apps 10 --out-di
 ### 1.2 Chạy thử (20 mẫu)
 
 ```bash
-ss -ltnp | grep -q ':8000 ' && echo "cổng 8000 đang bận: pkill -f 'vllm serve' hoặc dùng --port khác"
-vllm serve models/base/Qwen3.5-4B --served-model-name base --max-model-len 16384 \
-  --enable-prefix-caching --gpu-memory-utilization 0.85 --seed 0 > outputs/vllm.log 2>&1 &
-until curl -sf localhost:8000/v1/models > /dev/null; do sleep 5; done   # chờ server sẵn sàng (xem outputs/vllm.log)
-lifemate infer --data $DATA --split train --backend openai --model base --asr oracle \
+nvidia-smi --query-gpu=memory.used,memory.total --format=csv   # máy dùng chung: chừa VRAM cho người khác
+source scripts/serve.sh models/base/Qwen3.5-4B base 8011 0.85   # in đuôi log và dừng nếu vLLM chết khi khởi động
+lifemate infer --data $DATA --split train --backend openai --model base --base-url $BASE_URL --asr oracle \
   --limit 20 --out outputs/smoke.jsonl --trace outputs/smoke.trace.jsonl
 lifemate score --data $DATA --split train --submission outputs/smoke.jsonl --only-submitted
 ```
@@ -75,7 +75,7 @@ Lỗi API của vLLM, structured outputs hay chat template sẽ lộ ra ở bư�
 
 ```bash
 for K in 0 3; do
-  lifemate infer --data $DATA --split train --backend openai --model base --asr oracle \
+  lifemate infer --data $DATA --split train --backend openai --model base --base-url $BASE_URL --asr oracle \
     --ids-file $VAL --exclude-ids $VAL --fewshot-k $K --out outputs/base_k$K.jsonl --trace outputs/base_k$K.trace.jsonl
   lifemate score --data $DATA --split train --submission outputs/base_k$K.jsonl --ids-file $VAL
 done
@@ -86,7 +86,7 @@ done
 ### 1.4 ASR zero-shot
 
 ```bash
-kill %1   # tắt vLLM để nhường GPU cho ASR
+kill $VLLM_PID   # tắt vLLM để nhường GPU cho ASR
 lifemate transcribe --data $DATA --split train --asr qwen --asr-model models/base/Qwen3-ASR-0.6B --out outputs/asr0_train.jsonl
 lifemate transcribe --data $DATA --split public_test --asr qwen --asr-model models/base/Qwen3-ASR-0.6B --out outputs/asr0_public.jsonl
 lifemate asr-eval --data $DATA --transcripts outputs/asr0_train.jsonl --ids-file $VAL
@@ -97,7 +97,7 @@ Sau đó chạy lại 1.3 với `--transcripts outputs/asr0_train.jsonl` thay ch
 ### 1.5 Một bài nộp public để hiệu chỉnh
 
 ```bash
-lifemate infer --data $DATA --split public_test --backend openai --model base \
+lifemate infer --data $DATA --split public_test --backend openai --model base --base-url $BASE_URL \
   --transcripts outputs/asr0_public.jsonl --fewshot-k 3 --out outputs/sub_base.jsonl
 lifemate validate --data $DATA --split public_test --submission outputs/sub_base.jsonl
 ```
