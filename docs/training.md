@@ -59,7 +59,7 @@ HOLDOUT=none MIX_ASR=1 ASR=gipformer NAME=sft-full bash scripts/train_sft_24gb.s
 
 # ── 7. Bài nộp public: ASR fine-tune + LLM fine-tune ─────────────────────────
 ASR_MODEL=models/gipformer-full-e10 LORA=checkpoints/sft-full bash scripts/predict_public.sh
-#   → outputs/public_test/submission_sft-full.jsonl, upload lên trang thi
+#   → outputs/public_test/submission_sft-full__gipformer_models_gipformer-full-e10.jsonl, upload lên trang thi
 ```
 
 Bước 6 không phụ thuộc vào ASR fine-tune, nên có thể chạy song song khi GPU rảnh. Bước 3 và bước 5 tốn khoảng 20–40 phút GPU mỗi lần.

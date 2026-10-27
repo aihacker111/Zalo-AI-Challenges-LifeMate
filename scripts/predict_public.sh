@@ -5,11 +5,12 @@
 #   LORA=checkpoints/sft-v1 bash scripts/predict_public.sh          # base + LoRA adapter
 #   MODEL=models/sft-v1 bash scripts/predict_public.sh              # merged checkpoint
 #
+#   ASR_MODEL=models/gipformer-full-e10 LORA=checkpoints/sft-full bash scripts/predict_public.sh   # fine-tuned ASR
 #   ASR=qwen ASR_MODEL=checkpoints/asr-ft/checkpoint-390 bash scripts/predict_public.sh
 #
 # Settings (environment variables): SPLIT, MODEL, LORA, ASR (gipformer|chunkformer|qwen), ASR_MODEL, PORT, MEM,
 # FEWSHOT, OUT_DIR, TRANSCRIPTS.
-# Output: outputs/<split>/submission_<tag>.jsonl, ready to upload.
+# Output: outputs/<split>/submission_<llm>__<asr>.jsonl, ready to upload.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
@@ -31,9 +32,12 @@ if [[ "$ASR" == qwen && ! -e "$ASR_MODEL" && "$ASR_MODEL" == models/* ]]; then
 fi
 ASR_TAG=$(echo "${ASR}_${ASR_MODEL:-default}" | sed 's#models/base/##; s#checkpoints/##; s#[/:]#_#g')
 TRANSCRIPTS=${TRANSCRIPTS:-$OUT_DIR/asr_${ASR_TAG}.jsonl}
-SUB="$OUT_DIR/submission_${TAG}.jsonl"
+SUB="$OUT_DIR/submission_${TAG}__${ASR_TAG}.jsonl"   # LLM and ASR both in the name: no overwrite between runs
 
 echo "== 1/3 ASR ($ASR ${ASR_MODEL:-default model})"
+if [[ -s "$TRANSCRIPTS" && -n "$ASR_MODEL" && -f "$ASR_MODEL/encoder.onnx" && "$ASR_MODEL/encoder.onnx" -nt "$TRANSCRIPTS" ]]; then
+  echo "$ASR_MODEL was re-exported after $TRANSCRIPTS: transcribing again"; rm -f "$TRANSCRIPTS"
+fi
 if [[ -s "$TRANSCRIPTS" ]]; then
   echo "using cached transcripts: $TRANSCRIPTS"
 else
