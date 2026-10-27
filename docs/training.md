@@ -60,8 +60,10 @@ lifemate build-sft --data $DATA --asr oracle --holdout apps --n-apps 10 --out-di
 ### 1.2 Chạy thử (20 mẫu)
 
 ```bash
+ss -ltnp | grep -q ':8000 ' && echo "cổng 8000 đang bận: pkill -f 'vllm serve' hoặc dùng --port khác"
 vllm serve models/base/Qwen3.5-4B --served-model-name base --max-model-len 16384 \
-  --enable-prefix-caching --gpu-memory-utilization 0.85 --seed 0 &
+  --enable-prefix-caching --gpu-memory-utilization 0.85 --seed 0 > outputs/vllm.log 2>&1 &
+until curl -sf localhost:8000/v1/models > /dev/null; do sleep 5; done   # chờ server sẵn sàng (xem outputs/vllm.log)
 lifemate infer --data $DATA --split train --backend openai --model base --asr oracle \
   --limit 20 --out outputs/smoke.jsonl --trace outputs/smoke.trace.jsonl
 lifemate score --data $DATA --split train --submission outputs/smoke.jsonl --only-submitted

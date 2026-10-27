@@ -9,6 +9,7 @@
 from __future__ import annotations
 
 import json
+import urllib.error
 import urllib.request
 from collections.abc import Iterable
 from typing import Any, Protocol
@@ -78,14 +79,40 @@ class VLLMBackend:
         return out[0].outputs[0].text
 
 
+class BackendError(RuntimeError):
+    """The model server is unreachable or rejected the request."""
+
+
 class OpenAICompatBackend:
     def __init__(self, base_url: str, model: str, api_key: str = "EMPTY", timeout: float = 60.0, vllm_extras: bool = True, seed: int = 0):
-        self.url = base_url.rstrip("/") + "/chat/completions"
+        self.base_url = base_url.rstrip("/")
+        self.url = self.base_url + "/chat/completions"
         self.model = model
         self.api_key = api_key
         self.timeout = timeout
         self.vllm_extras = vllm_extras
         self.seed = seed
+
+    def _request(self, url: str, body: dict[str, Any] | None = None, timeout: float | None = None) -> dict[str, Any]:
+        req = urllib.request.Request(
+            url,
+            data=None if body is None else json.dumps(body).encode(),
+            headers={"Content-Type": "application/json", "Authorization": f"Bearer {self.api_key}"},
+        )
+        try:
+            with urllib.request.urlopen(req, timeout=timeout or self.timeout) as resp:  # noqa: S310 - URL comes from the user's config
+                return json.load(resp)
+        except urllib.error.HTTPError as e:
+            detail = e.read().decode("utf-8", "replace")[:500]
+            raise BackendError(f"{url} -> HTTP {e.code}: {detail}") from e
+        except (urllib.error.URLError, TimeoutError, ConnectionError) as e:
+            raise BackendError(f"{url} -> {e}") from e
+
+    def check(self) -> None:
+        """Fail fast when the server is down or does not serve ``self.model``."""
+        models = [m.get("id") for m in self._request(self.base_url + "/models", timeout=10).get("data", [])]
+        if self.model not in models:
+            raise BackendError(f"model {self.model!r} is not served at {self.base_url}; available: {models}")
 
     def generate(self, messages, schema, temperature, max_tokens):
         body: dict[str, Any] = {
@@ -99,13 +126,7 @@ class OpenAICompatBackend:
             body["response_format"] = {"type": "json_schema", "json_schema": {"name": "action", "schema": schema}}
         if self.vllm_extras:
             body["chat_template_kwargs"] = {"enable_thinking": False}
-        req = urllib.request.Request(
-            self.url,
-            data=json.dumps(body).encode(),
-            headers={"Content-Type": "application/json", "Authorization": f"Bearer {self.api_key}"},
-        )
-        with urllib.request.urlopen(req, timeout=self.timeout) as resp:  # noqa: S310 - URL comes from the user's config
-            payload = json.load(resp)
+        payload = self._request(self.url, body)
         return payload["choices"][0]["message"]["content"] or ""
 
 

@@ -121,6 +121,7 @@ def cmd_infer(args) -> None:
         from lifemate.agent.llm import OpenAICompatBackend
 
         backend = OpenAICompatBackend(args.base_url, args.model, api_key=args.api_key)
+        backend.check()
     else:
         from lifemate.agent.llm import VLLMBackend
 
@@ -320,9 +321,16 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main(argv: list[str] | None = None) -> int:
+    from lifemate.agent.llm import BackendError
+    from lifemate.pipeline import TooManyErrors
+
     args = build_parser().parse_args(argv)
     logging.basicConfig(level=logging.DEBUG if args.verbose else logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
-    args.func(args)
+    try:
+        args.func(args)
+    except (BackendError, TooManyErrors) as e:
+        log.error("%s", e)
+        return 2
     return 0
 
 

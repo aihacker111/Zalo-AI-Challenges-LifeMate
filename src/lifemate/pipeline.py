@@ -14,6 +14,10 @@ from lifemate.data import Sample
 log = logging.getLogger("lifemate")
 
 
+class TooManyErrors(RuntimeError):
+    """Raised when consecutive samples fail, so a broken backend never yields a full but empty submission."""
+
+
 def done_ids(path: Path) -> set[str]:
     if not path.exists():
         return set()
@@ -28,12 +32,13 @@ def run(
     out: str | Path,
     trace: str | Path | None = None,
     resume: bool = False,
+    max_consecutive_errors: int = 5,
 ) -> dict[str, float]:
     out = Path(out)
     out.parent.mkdir(parents=True, exist_ok=True)
     skip = done_ids(out) if resume else set()
     mode = "a" if resume else "w"
-    n = errors = 0
+    n = errors = streak = 0
     slowest = 0.0
     t0 = time.monotonic()
     ftrace = open(trace, mode, encoding="utf-8") if trace else None
@@ -60,6 +65,9 @@ def run(
                     )
                 n += 1
                 errors += result.error is not None
+                streak = streak + 1 if result.error else 0
+                if max_consecutive_errors and streak >= max_consecutive_errors:
+                    raise TooManyErrors(f"{streak} consecutive samples failed, last: {result.error}")
                 slowest = max(slowest, result.elapsed_s)
                 if result.error:
                     log.warning("%s: %s", sample.id, result.error)
