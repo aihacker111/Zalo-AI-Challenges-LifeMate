@@ -3,7 +3,8 @@
 # ONNX files that `lifemate transcribe --asr gipformer --asr-model <dir>` loads directly.
 #
 # Prerequisites
-#   1. bash scripts/gipformer_setup.sh && conda activate gipformer   (conda env with torch 2.8 + k2 + lhotse)
+#   1. Any env with a CUDA torch (e.g. conda activate lifemate). Missing k2 / lhotse / icefall are installed
+#      on the first run; k2 is matched to the torch already installed, torch itself is never changed.
 #   2. ASR manifests from the lifemate environment:
 #        lifemate asr-manifest --split train --holdout apps --out-dir outputs/asr_ft     # with a val set
 #        lifemate asr-manifest --split train --holdout none --out-dir outputs/asr_full   # all of train
@@ -36,10 +37,20 @@ OUT=${OUT:-models/gipformer-$TAG-e$EPOCH}
 RECIPE=$ICEFALL_DIR/egs/librispeech/ASR/zipformer
 export PYTHONPATH=$ICEFALL_DIR:${PYTHONPATH:-}
 
-python -c "import k2, lhotse" 2>/dev/null || {
-  echo "k2/lhotse not found in conda env '${CONDA_DEFAULT_ENV:-none}': run 'conda activate gipformer'"
-  echo "(create it once with: bash scripts/gipformer_setup.sh)"; exit 1; }
-[[ -d "$RECIPE" ]] || { echo "icefall not found at $ICEFALL_DIR (bash scripts/gipformer_setup.sh)"; exit 1; }
+# Dependencies, installed into the current env only when missing.
+if ! python -c "import k2" 2>/dev/null; then
+  echo "== k2 missing: installing the wheel built for this env's torch"
+  python recipes/gipformer/install_k2.py
+fi
+if ! python -c "import lhotse, sentencepiece, kaldialign, pypinyin, typeguard, dill, onnx, onnxruntime, tensorboard" 2>/dev/null; then
+  echo "== installing lhotse and icefall's Python dependencies"
+  pip install lhotse sentencepiece kaldialign pypinyin typeguard dill tensorboard "onnx>=1.15" "onnxruntime>=1.16.3"
+fi
+if [[ ! -d "$RECIPE" ]]; then
+  echo "== cloning icefall -> $ICEFALL_DIR"
+  mkdir -p "$(dirname "$ICEFALL_DIR")"
+  git clone --depth 1 https://github.com/k2-fsa/icefall "$ICEFALL_DIR"
+fi
 if [[ -n "$(pgrep -u "$(id -u)" -f "bin/vllm serve" || true)" ]]; then
   echo "a vLLM server of yours is running and holds GPU memory; stop it first (pgrep -af 'bin/vllm serve')"; exit 1
 fi
@@ -93,6 +104,6 @@ if run 4; then
   done
   cp "$BASE/tokens.txt" "$OUT/"
   ls -la "$OUT"
-  echo "Evaluate in the lifemate environment:"
+  echo "Evaluate:"
   echo "  ENGINES=\"gipformer gipformer:$OUT\" bash scripts/asr_benchmark.sh"
 fi

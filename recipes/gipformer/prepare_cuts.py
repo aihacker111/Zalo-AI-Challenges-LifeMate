@@ -9,7 +9,7 @@ Output in ``--out-dir``: ``cuts_train.jsonl.gz``, ``cuts_dev.jsonl.gz`` and thei
   containing pieces the BPE model does not know. Dev keeps every utterance.
 * Audio is resampled to 16 kHz. With ``--speed-perturb`` (default) train gets 0.9x and 1.1x copies.
 
-Runs in the gipformer environment (``scripts/gipformer_setup.sh``)::
+Runs in any env with lhotse + sentencepiece (``scripts/gipformer_finetune.sh`` installs them)::
 
     python recipes/gipformer/prepare_cuts.py --manifest-dir outputs/asr_ft \
         --bpe-model models/gipformer/base/bpe.model --out-dir outputs/gipformer/data_ft

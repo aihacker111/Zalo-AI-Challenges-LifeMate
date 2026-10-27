@@ -30,12 +30,9 @@ lifemate asr-manifest --split train --holdout apps --out-dir outputs/asr_ft     
 lifemate asr-manifest --split train --holdout none --out-dir outputs/asr_full   # 5.036 câu, không val
 ENGINES="gipformer" bash scripts/asr_benchmark.sh   # baseline: ghi lại dòng "WER spoken form"
 
-# ── 2. Conda env fine-tune (một lần, ~10 phút) ────────────────────────────────
-bash scripts/gipformer_setup.sh                  # conda env "gipformer" + third_party/icefall
-conda activate gipformer                         # torch 2.8 + k2, tách khỏi env lifemate (vLLM)
-
-# ── 3. Fine-tune có val ───────────────────────────────────────────────────────
+# ── 2-3. Fine-tune có val (vẫn env lifemate) ─────────────────────────────────
 bash scripts/gipformer_finetune.sh
+#   lần đầu tự cài k2 khớp đúng torch đang có (không cài lại torch), lhotse, và clone icefall
 #   0/4 tải model gốc → models/gipformer/base (model.pt, bpe.model, tokens.txt, *.onnx)
 #   1/4 model.pt → pretrained.pt (định dạng finetune.py cần; in ra số key thiếu, phải là 0)
 #   2/4 cut + fbank, speed perturb 0.9/1.0/1.1 → outputs/gipformer/data_ft
@@ -44,20 +41,17 @@ bash scripts/gipformer_finetune.sh
 # Hết VRAM: MAX_DURATION=300 bash scripts/gipformer_finetune.sh
 # Validation loss in ra mỗi 100 batch, kể cả ở batch 0 (= model gốc). Loss phải giảm.
 
-# ── 4. Đo WER (env lifemate) ──────────────────────────────────────────────────
-conda activate lifemate
+# ── 4. Đo WER ──────────────────────────────────────────────────────────────────
 ENGINES="gipformer gipformer:models/gipformer-ft-e10" bash scripts/asr_benchmark.sh
-# Thử epoch khác (env gipformer, chỉ export, ~1 phút):
+# Thử epoch khác (chỉ export, ~1 phút):
 #   STAGE=4 EPOCH=6 bash scripts/gipformer_finetune.sh  →  models/gipformer-ft-e6
 # Nếu chưa tốt hơn baseline: thử BASE_LR=0.001 hoặc EPOCHS=6, đặt TAG khác để giữ bản cũ.
 
 # ── 5. Fine-tune trên toàn bộ train, dùng số epoch tốt nhất ở bước 4 ─────────
-conda activate gipformer
 MANIFEST=outputs/asr_full TAG=full EPOCHS=10 bash scripts/gipformer_finetune.sh
 #   → models/gipformer-full-e10. Không còn val: tin vào kết quả của bước 4.
 
-# ── 6. LLM SFT trên toàn bộ dữ liệu (env lifemate, ~6–7 giờ) ─────────────────
-conda activate lifemate
+# ── 6. LLM SFT trên toàn bộ dữ liệu (~6–7 giờ) ───────────────────────────────
 HOLDOUT=none MIX_ASR=1 ASR=gipformer NAME=sft-full bash scripts/train_sft_24gb.sh
 #   MIX_ASR dùng gipformer GỐC (cố ý, xem giải thích ở trên)
 
