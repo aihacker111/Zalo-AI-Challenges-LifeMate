@@ -137,7 +137,7 @@ Với backend `openai`, `infer` kiểm tra server và tên model trước khi ch
 | `scripts/asr_benchmark.sh` | So sánh các engine ASR trên 878 câu val (WER, sai số, thời gian) |
 | `scripts/predict_public.sh` | ASR → vLLM → agent → validate, ra file nộp cho public_test (hoặc `SPLIT=…`) |
 | `scripts/baseline.sh` | Baseline k=0 và k=3 trên train (transcript gold) |
-| `scripts/gipformer_setup.sh` | Tạo venv riêng cho fine-tune gipformer (torch 2.8 + k2 + lhotse + icefall) |
+| `scripts/gipformer_setup.sh` | Tạo conda env `gipformer` cho fine-tune gipformer (torch 2.8 + k2 + lhotse + icefall) |
 | `scripts/gipformer_finetune.sh` | Fine-tune gipformer trên audio train bằng icefall → export ONNX (`MANIFEST=outputs/asr_full TAG=full` cho toàn bộ dữ liệu) |
 | `scripts/train_sft_24gb.sh` | Từ dữ liệu thô tới LoRA: ASR train → dữ liệu SFT (gold + ASR) → train. `HOLDOUT=none` để train trên toàn bộ train |
 

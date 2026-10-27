@@ -3,7 +3,7 @@
 # ONNX files that `lifemate transcribe --asr gipformer --asr-model <dir>` loads directly.
 #
 # Prerequisites
-#   1. bash scripts/gipformer_setup.sh && source .venv-gipformer/bin/activate
+#   1. bash scripts/gipformer_setup.sh && conda activate gipformer   (conda env with torch 2.8 + k2 + lhotse)
 #   2. ASR manifests from the lifemate environment:
 #        lifemate asr-manifest --split train --holdout apps --out-dir outputs/asr_ft     # with a val set
 #        lifemate asr-manifest --split train --holdout none --out-dir outputs/asr_full   # all of train
@@ -37,7 +37,8 @@ RECIPE=$ICEFALL_DIR/egs/librispeech/ASR/zipformer
 export PYTHONPATH=$ICEFALL_DIR:${PYTHONPATH:-}
 
 python -c "import k2, lhotse" 2>/dev/null || {
-  echo "k2/lhotse not found: run 'source .venv-gipformer/bin/activate' (setup: bash scripts/gipformer_setup.sh)"; exit 1; }
+  echo "k2/lhotse not found in conda env '${CONDA_DEFAULT_ENV:-none}': run 'conda activate gipformer'"
+  echo "(create it once with: bash scripts/gipformer_setup.sh)"; exit 1; }
 [[ -d "$RECIPE" ]] || { echo "icefall not found at $ICEFALL_DIR (bash scripts/gipformer_setup.sh)"; exit 1; }
 if [[ -n "$(pgrep -u "$(id -u)" -f "bin/vllm serve" || true)" ]]; then
   echo "a vLLM server of yours is running and holds GPU memory; stop it first (pgrep -af 'bin/vllm serve')"; exit 1
