@@ -137,11 +137,13 @@ Với backend `openai`, `infer` kiểm tra server và tên model trước khi ch
 | `scripts/asr_benchmark.sh` | So sánh các engine ASR trên 878 câu val (WER, sai số, thời gian) |
 | `scripts/predict_public.sh` | ASR → vLLM → agent → validate, ra file nộp cho public_test (hoặc `SPLIT=…`) |
 | `scripts/baseline.sh` | Baseline k=0 và k=3 trên train (transcript gold) |
+| `scripts/gipformer_setup.sh` | Tạo venv riêng cho fine-tune gipformer (torch 2.8 + k2 + lhotse + icefall) |
+| `scripts/gipformer_finetune.sh` | Fine-tune gipformer trên audio train bằng icefall → export ONNX (`MANIFEST=outputs/asr_full TAG=full` cho toàn bộ dữ liệu) |
 | `scripts/train_sft_24gb.sh` | Từ dữ liệu thô tới LoRA: ASR train → dữ liệu SFT (gold + ASR) → train. `HOLDOUT=none` để train trên toàn bộ train |
 
 ## Quy trình đề xuất
 
-Hướng dẫn chi tiết từng lệnh, mốc thời gian và bảng nhật ký nằm trong [docs/training.md](docs/training.md). Quy trình đang dùng (gipformer + LLM SFT trên toàn bộ dữ liệu) nằm ở mục đầu tiên của file đó.
+Hướng dẫn chi tiết từng lệnh, mốc thời gian và bảng nhật ký nằm trong [docs/training.md](docs/training.md). Quy trình đang dùng (fine-tune gipformer, rồi LLM SFT trên toàn bộ dữ liệu) nằm ở mục đầu tiên của file đó.
 
 1. **Baseline không train.** Đo điểm zero-shot và few-shot (k = 3) trên tập val leave-apps-out với transcript gold (mục 3 ở trên). Lỗi được phân loại thành `extra_read`, `missing_read`, `write_mismatch`, `ask_mismatch`, `oos_false_action`…
 2. **Đo ASR.** Chạy `transcribe` trên train rồi `asr-eval`; lưu ý riêng tỉ lệ sai số (tiền, giờ, số điện thoại).

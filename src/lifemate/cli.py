@@ -255,6 +255,7 @@ def cmd_build_sft(args) -> None:
 def cmd_asr_eval(args) -> None:
     from lifemate.asr import TranscriptStore, oracle_transcripts
     from lifemate.asr.metrics import number_error_rate, wer, wer_no_tone
+    from lifemate.asr.normalize_vi import to_spoken
 
     split = _split(args)
     gold = oracle_transcripts(split)
@@ -268,6 +269,9 @@ def cmd_asr_eval(args) -> None:
     print(f"WER               {100 * wer(refs, hyps):.2f}%")
     print(f"WER without tones {100 * wer_no_tone(refs, hyps):.2f}%")
     print(f"number errors     {100 * number_error_rate(refs, hyps):.2f}% of utterances with digits")
+    # Spoken form (numbers in words, as gipformer writes them) on both sides: the fair comparison.
+    srefs, shyps = [to_spoken(r) for r in refs], [to_spoken(h) for h in hyps]
+    print(f"WER spoken form   {100 * wer(srefs, shyps):.2f}%   <- compare engines on this line")
 
 
 def cmd_asr_manifest(args) -> None:

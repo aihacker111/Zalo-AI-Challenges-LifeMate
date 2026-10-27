@@ -1,41 +1,79 @@
 # Quy trình đầy đủ: từ dữ liệu tới bài nộp
 
-## Quy trình hiện tại (gipformer + LLM SFT trên toàn bộ dữ liệu)
+## Quy trình hiện tại (fine-tune gipformer → LLM SFT trên toàn bộ dữ liệu)
 
-Kết quả trên 878 câu val cho thấy **gipformer1.5-68M (chưa fine-tune) tốt nhất**: WER 16,1%, so với 36,1% của Qwen3-ASR-0.6B gốc và 27,0% sau khi fine-tune. Vì vậy:
-- **ASR:** dùng gipformer, không fine-tune. Model chạy trên CPU và không tốn VRAM.
-- **LLM:** SFT trên toàn bộ 1.545 mẫu. Input gồm transcript gold (kèm augment đổi tên tool) và transcript gipformer, để model quen với lỗi ASR thật. Gipformer chưa từng nghe audio train, nên transcript của nó nhiễu như khi gặp đề thật.
+Trên 878 câu val, **gipformer1.5-68M chưa fine-tune** đạt WER 16,1%, tốt hơn nhiều so với Qwen3-ASR-0.6B (36,1% gốc, 27,0% sau fine-tune). Bước tiếp theo là fine-tune chính gipformer trên audio train (6,8 giờ, 5.036 câu, 16 kHz mono):
+
+- **ASR:** fine-tune gipformer bằng icefall (`zipformer/finetune.py`), rồi export ra ONNX. `lifemate transcribe --asr gipformer --asr-model <thư mục>` đọc được ngay.
+  - Chạy trước một lần có tập val (giữ lại 10 app, 878 câu) để chọn số epoch.
+  - Sau đó train lại trên toàn bộ train.
+- **LLM:** SFT vẫn dùng transcript của gipformer **gốc** (`MIX_ASR=1 ASR=gipformer`, không truyền `ASR_MODEL`). Bản fine-tune đã học thuộc audio train nên gần như không sai trên train. Nếu dùng transcript của nó, LLM sẽ không thấy lỗi ASR thật như khi gặp đề.
+- **Bài nộp:** gipformer fine-tune (full) → LLM SFT (full).
+
+Gipformer viết kiểu văn nói: chữ thường, không dấu câu, số đọc thành chữ ("hai mươi bốn độ"). Vì vậy:
+- Text train được chuyển sang dạng này (`src/lifemate/asr/normalize_vi.py`).
+- Bỏ 177 câu (3,5%) có cách đọc không chắc chắn, như "RV245", "VTV3", "7h30".
+- `asr-eval` in thêm dòng **`WER spoken form`** (cả gold lẫn transcript đều đổi sang văn nói). Đây là con số dùng để so sánh các engine.
 
 ```bash
-# ── 0. Đồng bộ và chuẩn bị (máy GPU) ─────────────────────────────────────────
+# ── 0. Đồng bộ (máy GPU) ──────────────────────────────────────────────────────
 cd /media/hung/HDD2/workplaces/tin/Zalo-AI-Challenges-LifeMate
 git pull
+pgrep -af "bin/vllm serve"                       # nếu có dòng nào: kill <pid>
+nvidia-smi                                       # GPU phải trống
+tmux new -s asr                                  # Ctrl+B rồi D để thoát; tmux attach -t asr để xem lại
+
+# ── 1. Manifest + baseline (env lifemate) ─────────────────────────────────────
 conda activate lifemate
 pip install -e ".[gipformer]"
-pip show transformers | grep Version              # phải là 5.x
-pgrep -af "bin/vllm serve"                        # nếu có dòng nào: kill <pid>
-nvidia-smi                                        # GPU phải trống
-tmux new -s full                                  # Ctrl+B rồi D để thoát; tmux attach -t full để xem lại
+lifemate asr-manifest --split train --holdout apps --out-dir outputs/asr_ft     # 4.158 train / 878 val
+lifemate asr-manifest --split train --holdout none --out-dir outputs/asr_full   # 5.036 câu, không val
+ENGINES="gipformer" bash scripts/asr_benchmark.sh   # baseline: ghi lại dòng "WER spoken form"
 
-# ── 1. Train LLM trên toàn bộ dữ liệu (~6–7 giờ) ─────────────────────────────
+# ── 2. Môi trường fine-tune (một lần, ~10 phút) ───────────────────────────────
+conda deactivate                                 # venv riêng: torch 2.8 + k2, không đụng env vLLM
+bash scripts/gipformer_setup.sh                  # .venv-gipformer + third_party/icefall
+source .venv-gipformer/bin/activate
+
+# ── 3. Fine-tune có val ───────────────────────────────────────────────────────
+bash scripts/gipformer_finetune.sh
+#   0/4 tải model gốc → models/gipformer/base (model.pt, bpe.model, tokens.txt, *.onnx)
+#   1/4 model.pt → pretrained.pt (định dạng finetune.py cần; in ra số key thiếu, phải là 0)
+#   2/4 cut + fbank, speed perturb 0.9/1.0/1.1 → outputs/gipformer/data_ft
+#   3/4 10 epoch, lr 0.002, max-duration 600 → checkpoints/gipformer-ft (log trong exp-dir/log/)
+#   4/4 export epoch 10 (trung bình 2 epoch cuối) → models/gipformer-ft-e10
+# Hết VRAM: MAX_DURATION=300 bash scripts/gipformer_finetune.sh
+# Validation loss in ra mỗi 100 batch, kể cả ở batch 0 (= model gốc). Loss phải giảm.
+
+# ── 4. Đo WER (env lifemate) ──────────────────────────────────────────────────
+deactivate && conda activate lifemate
+ENGINES="gipformer gipformer:models/gipformer-ft-e10" bash scripts/asr_benchmark.sh
+# Thử epoch khác (env gipformer, chỉ export, ~1 phút):
+#   STAGE=4 EPOCH=6 bash scripts/gipformer_finetune.sh  →  models/gipformer-ft-e6
+# Nếu chưa tốt hơn baseline: thử BASE_LR=0.001 hoặc EPOCHS=6, đặt TAG khác để giữ bản cũ.
+
+# ── 5. Fine-tune trên toàn bộ train, dùng số epoch tốt nhất ở bước 4 ─────────
+source .venv-gipformer/bin/activate
+MANIFEST=outputs/asr_full TAG=full EPOCHS=10 bash scripts/gipformer_finetune.sh
+#   → models/gipformer-full-e10. Không còn val: tin vào kết quả của bước 4.
+
+# ── 6. LLM SFT trên toàn bộ dữ liệu (env lifemate, ~6–7 giờ) ─────────────────
+deactivate && conda activate lifemate
 HOLDOUT=none MIX_ASR=1 ASR=gipformer NAME=sft-full bash scripts/train_sft_24gb.sh
-#   1/3 gipformer cho 5.036 câu train (CPU, ~40–50 phút) → outputs/asr_gipformer_train.jsonl
-#   2/3 dữ liệu SFT: gold (+1 bản đổi tên tool) + gipformer → outputs/sft_none_mix/train.jsonl (~4.600 mẫu)
-#   3/3 LoRA SFT 1 epoch → checkpoints/sft-full, log ở outputs/sft-full.log
+#   MIX_ASR dùng gipformer GỐC (cố ý, xem giải thích ở trên)
 
-# ── 2. Bài nộp public ─────────────────────────────────────────────────────────
-LORA=checkpoints/sft-full bash scripts/predict_public.sh
-#   → outputs/public_test/submission_sft-full.jsonl (634 dòng), upload lên trang thi
+# ── 7. Bài nộp public: ASR fine-tune + LLM fine-tune ─────────────────────────
+ASR_MODEL=models/gipformer-full-e10 LORA=checkpoints/sft-full bash scripts/predict_public.sh
+#   → outputs/public_test/submission_sft-full.jsonl, upload lên trang thi
 ```
 
-Bản này đã học cả tập val, nên không đo được trên val. Điểm public là thước đo duy nhất.
+Bước 6 không phụ thuộc vào ASR fine-tune, nên có thể chạy song song khi GPU rảnh. Bước 3 và bước 5 tốn khoảng 20–40 phút GPU mỗi lần.
 
 ### Docker (trước 23:59 ngày 16/11)
 
 ```bash
 python -m lifemate.train.merge_lora --base models/base/Qwen3.5-4B --adapter checkpoints/sft-full --out models/llm
-huggingface-cli download g-group-ai-lab/gipformer1.5-68M-rnnt --local-dir models/asr \
-  --include "encoder.onnx" "decoder.onnx" "joiner.onnx" "tokens.txt"
+mkdir -p models/asr && cp models/gipformer-full-e10/{encoder,decoder,joiner}.onnx models/gipformer-full-e10/tokens.txt models/asr/
 mkdir -p assets/train && cp data/train/train.jsonl assets/train/
 docker build -f docker/Dockerfile -t lifemate:final .
 time docker run --rm --gpus all --network none \
@@ -44,7 +82,7 @@ time docker run --rm --gpus all --network none \
 
 Trước khi nộp, kiểm tra:
 - `validate` báo `OK`.
-- Điểm public của `outputs/docker/submission.jsonl` khớp với bài nộp ở bước 2.
+- Điểm public của `outputs/docker/submission.jsonl` khớp với bài nộp ở bước 7.
 - Trung bình dưới 30 giây mỗi mẫu.
 - Tổng tham số khoảng 4,2B (LLM) + 0,07B (gipformer), dưới trần 6B.
 
