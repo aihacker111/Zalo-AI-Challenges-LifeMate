@@ -76,6 +76,8 @@ source scripts/serve.sh models/base/Qwen3.5-4B base 8011 0.85    # model, tên p
 
 Phải chạy bằng `source`, không dùng `bash`, để hai biến này còn lại trong shell. Tắt server bằng `kill $VLLM_PID`.
 
+`--base-url` của `infer` mặc định lấy `$LIFEMATE_BASE_URL`, rồi `$BASE_URL`, cuối cùng là `http://localhost:8011/v1`. Ở terminal khác với terminal đã chạy `serve.sh`, nó vẫn trỏ đúng tới cổng 8011.
+
 ### 3. Chạy agent và chấm điểm
 
 ```bash
@@ -160,7 +162,7 @@ Qwen3.5 dùng kiến trúc lai Gated DeltaNet. Cài thêm `flash-linear-attentio
 |---|---|---|
 | `infer` báo `HTTP 404`, hoặc `curl localhost:8000/v1/models` trả `{"detail":"Invalid API key"}` | Cổng 8000 đang do một dịch vụ khác giữ (thường gặp trên máy dùng chung) | Dùng cổng khác: `source scripts/serve.sh … 8011 …`. **Đừng tắt tiến trình của người khác.** |
 | `serve.sh` báo `port … is already in use` | Còn một server cũ ở cổng đó | `curl localhost:<cổng>/v1/models`: nếu có model của mình thì `export BASE_URL=http://localhost:<cổng>/v1`; nếu không, đổi cổng |
-| `argument --base-url: expected one argument` | `$BASE_URL` rỗng: `serve.sh` chạy bằng `bash` hoặc ở terminal khác | Chạy `source scripts/serve.sh …`, hoặc ghi thẳng `--base-url http://localhost:8011/v1` |
+| `argument --… : expected one argument` | Một biến shell (`$BASE_URL`, `$DATA`, `$VAL`…) rỗng trong terminal hiện tại | Bỏ tham số đó (đều có giá trị mặc định), hoặc ghi thẳng giá trị, ví dụ `--ids-file outputs/sft/val_ids.txt` |
 | `Connection refused` | Server chưa chạy hoặc đã chết | Xem `tail -60 outputs/vllm_<cổng>.log`, rồi khởi động lại bằng `serve.sh` |
 | `Free memory on device … is less than desired` | GPU đang được người khác dùng | Xem `nvidia-smi`, hạ tham số VRAM của `serve.sh` (ví dụ `0.6`) |
 | `EngineDeadError` ở request đầu tiên | Lỗi trong tiến trình EngineCore | `grep -v APIServer outputs/vllm_<cổng>.log \| grep -A40 Traceback`; thử `--no-constrained` để loại trừ bộ ràng buộc JSON |

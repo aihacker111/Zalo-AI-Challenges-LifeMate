@@ -265,7 +265,11 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--backend", choices=["vllm", "openai", "oracle"], default="vllm")
     s.add_argument("--model", default="Qwen/Qwen3.5-4B")
     s.add_argument("--lora", default=None, help="LoRA adapter (vllm backend)")
-    s.add_argument("--base-url", default="http://localhost:8000/v1")
+    s.add_argument(
+        "--base-url",
+        default=os.environ.get("LIFEMATE_BASE_URL") or os.environ.get("BASE_URL") or "http://localhost:8011/v1",
+        help="OpenAI-compatible server (default: $LIFEMATE_BASE_URL, $BASE_URL set by scripts/serve.sh, or localhost:8011)",
+    )
     s.add_argument("--api-key", default="EMPTY")
     s.add_argument("--max-model-len", type=int, default=16384)
     s.add_argument("--gpu-memory-utilization", type=float, default=0.7)
